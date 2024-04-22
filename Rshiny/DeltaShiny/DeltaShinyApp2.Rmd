@@ -17,6 +17,10 @@ This is an R Markdown document. Markdown is a simple formatting syntax for autho
 When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r libraries}
+# Set a CRAN mirror
+options(repos = "https://cloud.r-project.org/")
+
+
 library(shiny)
 library(dplyr)
 library(magrittr)
@@ -31,6 +35,17 @@ library(tidyverse)
 library(raster)
 library(sp)
 library(htmltools)
+library(DT)
+install.packages("shinydashboard")
+library(shinydashboard)
+install.packages('rsconnect')
+library(rsconnect)
+
+rsconnect::setAccountInfo(name='12022001delta', token='74149036116CAD52177D1FDE7300C117', secret='8dGpPLVs8WnCRdo5iNDu+7WI2qJBg+1cuSVmXci/')
+
+rsconnect::deployApp("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny\\DeltaShinyApp3.Rmd")
+
+knitr::opts_knit$set(root.dir = "C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
 ```
 
 ##Define Functions to Make life easier
@@ -277,9 +292,45 @@ our_fishstations_df <- fish_stations_df %>% dplyr::filter(`Station Number` %in% 
 our_fishstations_df <- our_fishstations_df %>% rename("Station" = "Station Number")
 
 our_zoopstations_df <- zooplank_stations_df %>% dplyr::filter(`Station` %in% Zoop_station_summary_df$Station)
+
+
+#Get some Summary stats
+grouped_fish <- our_fishstations_df %>% 
+                  group_by(Region) %>% 
+                  count()
+
+grouped_plank <- our_zoopstations_df %>%
+                group_by(Region) %>% count()
+grouped_plank <- data.frame(
+  Region = grouped_plank$Region,
+  plank_observes = grouped_plank$n
+)
+df_zeros <- data.frame(
+  Region = c('South Bay', 'Central Bay'),
+  plank_observes = c(0,0)
+)
+grouped_plank <- rbind(grouped_plank, df_zeros)
+
+station_counts <- merge(grouped_fish, grouped_plank, by = 'Region')
+
+grouped_plank <- spread(grouped_plank, key = Region, value = plank_observes)
+grouped_fish <- spread(grouped_fish, key = Region, value = n)
+
+station_counts <- rbind(grouped_plank, grouped_fish)
+rownames(station_counts) <- c("Plankton Stations", "Fish Stations")
+
+Total_counts <- c(16, 41)
+# 
+station_counts <- cbind(`Total Stations Zoop > Fish` = Total_counts, station_counts)
+
+Test_stations <- subset(station_counts, select = names(station_counts) %in% c('South Bay', 'Delta', 'Confluence'))
+
+print(rowSums(Test_stations)[1])
+
+```
 ```
 
-
+```
 ```{r ShinyApp}
 #Build Icons
 # icons <- awesomeIcons(
