@@ -1,29 +1,21 @@
 ---
 title: "DeltaShinyApp3"
 author: "Tyler Marino"
-date: "2024-04-18"
+date: "2024-05-14"
 output: html_document
-runtime: shiny
 ---
-
 ```{r setup, include=FALSE}
+
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This R Markdown document is made interactive using Shiny. Unlike the more traditional workflow of creating static reports, you can now create documents that allow your readers to change the assumptions underlying your analysis and see the results immediately. 
+## R Markdown
 
-To learn more, see [Interactive Documents](http://rmarkdown.rstudio.com/authoring_shiny.html).
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
 
-## packages and app deployment
-
-
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
 ```{r libraries}
-
-# Set a CRAN mirror
-options(repos = "https://cloud.r-project.org/")
-
-
 library(shiny)
 library(dplyr)
 library(magrittr)
@@ -39,23 +31,24 @@ library(raster)
 library(sp)
 library(htmltools)
 library(DT)
-install.packages("shinydashboard")
+#install.packages("shinydashboard")
 library(shinydashboard)
-install.packages('rsconnect')
 library(rsconnect)
 
+### knitr::opts_knit$set(root.dir = "C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
+
+
+```
+
+
+
+```{r}
 rsconnect::setAccountInfo(name='12022001delta', token='74149036116CAD52177D1FDE7300C117', secret='8dGpPLVs8WnCRdo5iNDu+7WI2qJBg+1cuSVmXci/')
 
-rsconnect::deployApp("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny\\DeltaShinyApp3.Rmd")
-
-knitr::opts_knit$set(root.dir = "C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
-
+rsconnect::deployApp("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\Rshiny\\DeltaShiny\\DeltaShinyApp2.Rmd")
 ```
-```
-## Embedded Application
 
-It's also possible to embed an entire Shiny application within an R Markdown document using the `shinyAppDir` function. This example embeds a Shiny application located in another directory:
-```
+##Define Functions to Make life easier
 ```{r Function Definitions}
 
 
@@ -215,9 +208,10 @@ Group_and_list_unique <- function(data) {
 
 ```
 
-Note the use of the `height` parameter to determine how much vertical space the embedded application should occupy.
+## My End information and variable setting
+
 ```{r Data Management, echo=FALSE}
-setwd("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
+#setwd("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
 list.files(path = "C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
 file.access("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny\\StationPoints")
 getwd()
@@ -262,6 +256,7 @@ zooplank_stations_df$Region[zooplank_stations_df$Region == "Lower Sacramento Riv
 zooplank_stations_df$Region[zooplank_stations_df$Region == "Lower San Joaquin River"] <- "Delta"
 
 
+
 #Create inputs for selecting boxes
 station_regions_boxes <-  c("Select All", unique(fish_stations_df$`Region`))
 Zooplank_station_region_boxes <- c("Select All", unique(zooplank_stations_df$Region))
@@ -275,11 +270,17 @@ FishStationMeanDF <- GetMeanRegionDF(fish_stations_df)
 
 
 #Get Station Summary data for Fish Stations
-Station_summary_df <- read.csv("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny\\StationPoints\\Stationsummary.csv")
+Station_summary_df_long <- read.csv("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny\\StationPoints\\Stationsummary.csv")
+
+Station_summary_df_long$Region[Station_summary_df_long$Region == "South"] <- "South Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "Central"] <- "Central Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "Suisun"] <- "Suisun Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "San Pablo"] <- "San Pablo Bay"
+
 
 #Groupby station number, list the results
 
-Station_summary_df <- Station_summary_df %>% group_by(Station) %>%
+Station_summary_df <- Station_summary_df_long %>% group_by(Station) %>%
     summarise_all(list(unique = ~list(unique(.))))
 
 #Rename the columns to fit the standard names, not xxx_unique
@@ -288,10 +289,6 @@ renames <- c("Group", "Taxa", "Region", "YearMin", "YearMax", "Yeartot", "MeanCP
 
 new_names_list <- setNames(renames, unique_names)
 Station_summary_df <- Station_summary_df %>% rename_with(~new_names_list[.x], .cols = all_of(unique_names))
-
-Station_summary_df$Region[Station_summary_df$Region == "South"] <- "South Bay"
-Station_summary_df$Region[Station_summary_df$Region == "Central"] <- "Central Bay"
-Station_summary_df$Region[Station_summary_df$Region == "Suisun"] <- "Suisun Bay"
 
 
 
@@ -347,182 +344,197 @@ Test_stations <- subset(station_counts, select = names(station_counts) %in% c('S
 
 print(rowSums(Test_stations)[1])
 
-```
+
+            ###Graph data first graph(1)####
+#Code provided by Robert Fornier
+
+graphData1 <- read.csv("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\RiskData\\Fish_risk_5-15.csv")
+graphData1 <- graphData1 %>% mutate(MonthName = factor(MonthName, levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+
+graphData1$Region<-dplyr::recode(graphData1$Region, "Sanpablo" = "San Pablo Bay", "Suisun" = "Suisun Bay", "Delta" = "Delta", "Confluence" = "Confluence", "Central" = "Central Bay", "South" = "South Bay")
+
+graphData1$Region<-factor(graphData1$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay", "Central Bay", "South Bay"))
+
+alphas<- c("Key" = 1, "Off" = .3)
+
+p<-graphData1 %>% ggplot()+
+  geom_line(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window), linewidth=1.5)+
+  geom_point(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window, size=Percenttot))+
+  facet_wrap(~Region, nrow=3) +
+  scale_alpha_manual(values = alphas) +
+  guides(alpha = "none", size = guide_legend(title = "Percent of annual catch")) +
+  theme_classic() +ylab("Critical Decline Probability") +xlab("Month") +ylim(0,100)+
+  scale_color_brewer(palette = "Dark2") + scale_fill_brewer(palette = "Dark2")+theme(text = element_text(size = 20))
+p
+
+graphData1Delta <- graphData1 %>% dplyr::filter(Region %in% "Delta") 
+pDelta<-graphData1Delta %>% ggplot()+
+  geom_line(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window), linewidth=1.5)+
+  geom_point(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window, size=Percenttot))+
+  facet_wrap(~Region, nrow=3) +
+  scale_alpha_manual(values = alphas) +
+  guides(alpha = "none", size = guide_legend(title = "Percent of annual catch")) +
+  theme_classic() +ylab("Critical Decline Probability") +xlab("Month") +ylim(0,100)+
+  scale_color_brewer(palette = "Dark2") + scale_fill_brewer(palette = "Dark2")+theme(text = element_text(size = 20))
+pDelta
+
+TaxaOptions <- unique(graphData1$Taxa)
+
 ```
 
-You can also use the `shinyApp` function to define an application inline rather then in an external directory.
-```
+
 ```{r ShinyApp}
-#Build Icons
-# icons <- awesomeIcons(
-#   icon = 'ios-close',
-#   iconColor = 'grey',
-#   library = 'ion',
-#   markerColor = getColor(FishStationMeanDF)
-# )
+ui <- fluidPage(
+  titlePanel("Bay Delta Mismatch Findings"),
 
-      ####   This code will create a dasboard, a more webpage type app    ####
-ui <- dashboardPage(
-  dashboardHeader(title = "Bay Delta Mismatch Findings"),
-  dashboardSidebar(
-    sidebarMenu(
-      menuItem("Map", tabName = "map", icon = icon("map")),
-      menuItem("Data", tabName = "data", icon = icon("database"))
-    )
-  ),
-  dashboardBody(
-    tabItems(
-      tabItem(tabName = "map",
-              fluidRow(
-                box(
-                  title = "Map",
-                  leafletOutput("BayDelta"),
-                  checkboxInput("fish", "Show Fish Stations", TRUE),
-                  checkboxInput("zooplankton", "Show Zooplankton Stations", TRUE),
-                  checkboxGroupInput('region', 'Select Region',
-                                      choices = station_regions_boxes,
-                                      selected = "Select All"
-                  ),
-                ),
-                valueBoxOutput("countFish"),
-                valueBoxOutput("countZooplankton")
-              )
+  fluidRow(
+    column(width = 3,
+        sidebarPanel(
+          style = "width: 170px;",
+           #Check box for fish Stations
+          checkboxInput(
+            "fish",
+            "Show Fish Stations",
+            TRUE
+          ),
+
+          #Check box for zooplankton Stations
+          checkboxInput(
+            "zooplankton",
+            "Show Zooplankton Stations",
+            TRUE
+          ),
+
+          #Horizontal Line
+          hr(),
+
+          #Check boxes for regions
+          checkboxGroupInput(
+            'region',
+            'Select Region',
+            choices = station_regions_boxes,
+            selected = "Select All"
+          ),
+          checkboxGroupInput(
+            'Taxa',
+            'Select Taxa',
+            choices = c("Select All", TaxaOptions),
+            selected = "Select All"
+          ),
+              # Select input for basemap
+          selectInput(
+            "basemap",
+            "Select Basemap",
+            choices = c("OpenStreetMap", "CartoDB", "Esri.WorldStreetMap", "OpenStreetMap.HOT"),
+            selected = "OpenStreetMap"
+          )
+
+          )
       ),
-      tabItem(tabName = "data",
-              fluidRow(
-                box(
-                  title = "Data Sources and Findings",
-                  verbatimTextOutput("StationsCounts")
+    column(width = 9,
+
+    mainPanel(
+      style = "width: calc(100% - 100px);",
+      tabsetPanel(
+        tabPanel("Map",
+          column(width=8,
+            leafletOutput("BayDelta"),                   #MapDisplay
+            wellPanel(
+              textOutput("Region_Click")                 #Region Output
+            ),
+            verbatimTextOutput("StationsCounts")        #StationCounts
+            ),
+          column(width = 4,
+            valueBoxOutput("countFish"),                 #Fish stations counts
+            valueBoxOutput("countZooplankton")           #Zooplankton stations counts
                 )
+        ),
+        
+        ##First Data and Graph that Robert Sent me
+        tabPanel("Phenology",
+                 fluidRow(
+                   plotOutput("Plot1")
+                 )),
+        
+        #Station datatable displayed
+        tabPanel("Meta Data",
+                fluidRow(
+                  dataTableOutput("Station_data")     
+                )
+          ),
+        tabPanel("Information/Methods",
+          fluidRow(
+
+            )
               )
+
+        )
       )
     )
-  )
+    )
 )
 
-# ui <- fluidPage(
-#   titlePanel("Bay Delta Mismatch Findings"),
-# 
-# 
-#   sidebarLayout(
-#     sidebarPanel(
-# 
-# 
-#        #Check box for fish Stations
-#       checkboxInput(
-#         "fish",
-#         "Show Fish Stations",
-#         TRUE
-#       ),
-# 
-#       #Check box for zooplankton Stations
-#       checkboxInput(
-#         "zooplankton",
-#         "Show Zooplankton Stations",
-#         TRUE
-#       ),
-# 
-#       #Horizontal Line
-#       hr(),
-# 
-#       #Check boxes for regions
-#       checkboxGroupInput(
-#         'region',
-#         'Select Region',
-#         choices = station_regions_boxes,
-#         selected = "Select All"
-#       ),
-#           # Select input for basemap
-#       selectInput(
-#         "basemap",
-#         "Select Basemap",
-#         choices = c("OpenStreetMap", "CartoDB", "Esri.WorldStreetMap", "OpenStreetMap.HOT"),
-#         selected = "OpenStreetMap"
-#       )
-# 
-# 
-#     ),
-# 
-#     mainPanel(
-#       leafletOutput("BayDelta"),
-#       wellPanel(
-#         textOutput("Region_Click")
-#         ),
-#       verbatimTextOutput("StationsCounts"),
-#         plotOutput("plot"),
-#       wellPanel(
-#         uiOutput("station_click")
-#         )
-#       )
-#     )
-# )
 
-# ui <- fluidPage(
-#   titlePanel("Bay Delta Mismatch Findings"),
-# 
-#   sidebarLayout(
-#     sidebarPanel(
-#       # Sidebar content
-#       #Check box for fish Stations
-#       checkboxInput(
-#         "fish",
-#         "Show Fish Stations",
-#         TRUE
-#       ),
-# 
-#       #Check box for zooplankton Stations
-#       checkboxInput(
-#         "zooplankton",
-#         "Show Zooplankton Stations",
-#         TRUE
-#       ),
-# 
-#       #Horizontal Line
-#       hr(),
-# 
-#       #Check boxes for regions
-#       checkboxGroupInput(
-#         'region',
-#         'Select Region',
-#         choices = station_regions_boxes,
-#         selected = "Select All"
-#       ),
-#           # Select input for basemap
-#       selectInput(
-#         "basemap",
-#         "Select Basemap",
-#         choices = c("OpenStreetMap", "CartoDB", "Esri.WorldStreetMap", "OpenStreetMap.HOT"),
-#         selected = "OpenStreetMap"
-#       )
-#     ),
-#     mainPanel(
-#       tabsetPanel(
-#         tabPanel("Map",
-#                  fluidRow(
-#                    leafletOutput("BayDelta"),
-#                    textOutput("Region_Click"),
-#                    valueBoxOutput("countFish"),
-#                    valueBoxOutput("countZooplankton")
-#                    
-#                  )
-#         ),
-#         tabPanel("Data",
-#                  fluidRow(
-#                    verbatimTextOutput("StationsCounts")
-#                  )
-#         )
-#       )
-#     )
-#   )
-# )
+
+
 
 
 server <- function(input, output, session) {
   
   
+                  ### Clipping Data for Plot 1 ###
+  Graph1data <- reactive({
+    req(input$region)
+    req(input$Taxa)
+    graphData1 |> dplyr::filter(
+      if ("Select All" %in% input$region) 
+        {Region %in% station_regions} 
+      else 
+       {Region %in% input$region},
+      if ("Select All" %in% input$Taxa)
+        {Taxa %in% TaxaOptions} 
+      else 
+       {Taxa %in% input$Taxa}
+    )
+  })
+  
+  
+                   ###Main output Bay Delta Map###
+    output$BayDelta <- renderLeaflet({
+      leaflet::leaflet(FishStationMeanDF_to_disp()) %>%
+      addProviderTiles(input$basemap) %>%
+      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%
+      addMarkers(
+        lng = ~long,
+        lat = ~lat,
+        label = ~Region
+      )
+  })
+  
+
+    
+                    #Add Legend before
+    observe({
+      leaflet::leafletProxy("BayDelta") %>%
+        addLegend(
+          position = "bottomright", 
+          colors = c("black", "darkred"), 
+          labels = c("Fish Stations", "Zooplankton Stations"), 
+          opacity = 1 
+        )
+     })
+    
+                  #Prompt a marker to be selected
+    output$click_info <- renderText({
+      paste("Please Select a Marker")
+        })
+    output$Station_data <- renderDataTable({fish_zoop_data()})
+  
+  
                   #### Trimming Data Sets based on inputs ####
   
-  #Clip the fish df based on region
+                  #Clip the fish df based on region
+    
   fish_df_to_disp <- reactive({
     req(input$region)
     our_fishstations_df |> dplyr::filter(
@@ -533,7 +545,8 @@ server <- function(input, output, session) {
     )
   })
   
-  #Clip the zooplankton df based on region
+                  #Clip the zooplankton df based on region
+    
   zooplank_df_to_disp <- reactive({
     req(input$region)
     our_zoopstations_df |> dplyr::filter(
@@ -543,7 +556,9 @@ server <- function(input, output, session) {
         {Region %in% input$region}
     )
   })
-  #Filter the meanLocation df based on region
+  
+                 #Filter the meanLocation df based on region
+  
   FishStationMeanDF_to_disp <- reactive({
     req(input$region)
     FishStationMeanDF |> dplyr::filter(
@@ -554,7 +569,8 @@ server <- function(input, output, session) {
     )
   })
   
-  # Filter the station regions
+                  # Filter the station regions
+  
   Filtered_Station_counts <- reactive({
     req(input$region)
     station_counts <- subset(station_counts, select = -`Total Stations Zoop > Fish`)
@@ -565,69 +581,116 @@ server <- function(input, output, session) {
     }
   })
   
-
-#Main output is the Bay Delta Map with centroids dipicting regions
-  output$BayDelta <- renderLeaflet({
-    leaflet(FishStationMeanDF_to_disp()) %>%
-      addProviderTiles(input$basemap) %>%
-      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%
-      addMarkers(
-        lng = ~long,
-        lat = ~lat,
-        label = ~Region
-      )
-  })
+      #Define function to gather fish/zoop data based on marker
+    fish_zoop_data_marker <- reactive({
+      req(input$BayDelta_marker_click)
+      
+      event <- input$BayDelta_marker_click
+      id <- event$id
+      grouping <- event$group
+      selected_marker(event$id)
+      
+      data <- Station_summary_df_long[Station_summary_df_long$Station ==selected_marker(), ]
+      return(data)
+    })
+    
+          #Define function to gather fish/zoop data based on marker region
+    fish_zoop_data_region_marker <- reactive({
+      req(input$BayDelta_marker_click)
+    
+        event <- input$BayDelta_marker_click
+        selected_marker(event$id)
+        data <- Station_summary_df_long[Station_summary_df_long$Region ==event$group, ]
   
-  #Prompt a marker to be selected
-  output$click_info <- renderText({
-      paste("Please Select a Marker")
-        })
+      
+      return(data)
+    })
+    
+              #Define function to gather fish/zoop data based on region box
+    metadata_box <- reactive({
+      req(input$region)
+      req(input$fish)
+      req(input$zooplankton)
+      data <- Station_summary_df_long %>% 
+        dplyr::filter(
+          if ("Select All" %in% input$region) 
+            {Region %in% Zooplank_station_regions} 
+          else 
+          {Region %in% input$region}
+        )
+      if (input$fish && !input$zooplankton) {
+        print(input$fish)
+        data <- data %>% dplyr::filter(Group == "Fish")
+      }
+      else if (!input$fish && input$zooplankton) {
+        data <- data %>% dplyr::filter(Group == "Zoop")
+      }
+
+      
+      return(data)
+    })
+    
+  
   
 
-  #No initial marker
+                  #No initial marker/region
   selected_marker <- reactiveVal(NULL)
-  
-      #Add Legend before
-  observe({
-    leafletProxy("BayDelta") %>%
-      addLegend(
-        position = "bottomright", 
-        colors = c("black", "darkred"), 
-        labels = c("Fish Stations", "Zooplankton Stations"), 
-        opacity = 1 
-      )
-  })
+  selected_region <- reactiveVal(NULL)
 
 
   
                #### Observing a Click ####
-  observeEvent(c(input$fish, input$zooplankton, input$region, input$basemap, input$BayDelta_marker_click), {
+    observeEvent(c(input$fish, input$zooplankton, input$region, input$basemap, input$BayDelta_marker_click), {
+      
+    observeEvent(c(input$fish, input$zooplankton, input$region, input$basemap), {
+      selected_marker(NULL)
+      output$Station_data <- renderDataTable({metadata_box()})
+    })
+      
+      ###Display Graph 1 for Graph 1 tab
+      
+      output$Plot1<- renderPlot({
+        Graph1data() %>% ggplot()+
+        geom_line(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window), linewidth=1.5)+
+        geom_point(aes(x=MonthName, y=Probability, color=Taxa, group=Taxa, alpha=Window, size=Percenttot))+
+        facet_wrap(~Region, nrow=3) +
+        scale_alpha_manual(values = alphas) +
+        guides(alpha = "none", size = guide_legend(title = "Percent of annual catch")) +
+        theme_classic() +ylab("Critical Decline Probability") +xlab("Month") +ylim(0,100)+
+        scale_color_brewer(palette = "Dark2") + scale_fill_brewer(palette = "Dark2")+theme(text = element_text(size = 20))
+        })
     
-    
-        ##  Render the station counts table ##
-  
-  # Render the fish station counts
-output$countFish <- renderValueBox({
-  # Calculate the total count of fish stations based on the selected regions
-  if (is.null(Filtered_Station_counts())) {
-    total_fish_stations <- 0
-  } else {
-    # Calculate the total count of fish stations based on the selected regions
-    total_fish_stations <- rowSums(Filtered_Station_counts())[2]
-  }
-  valueBox(total_fish_stations, "Total Fish Stations", icon = icon("fish"), color = "blue")
-})
-
-  output$countZooplankton <- renderValueBox({
-    # Count total zooplankton stations
+      
+        ##  Render the station counts Feature ##
+      
+      # Calculate the total count of fish stations based on the selected regions
+      
+    output$countFish <- renderValueBox({
       if (is.null(Filtered_Station_counts())) {
-    total_zooplankton_stations <- 0
-  } else {
-    # Calculate the total count of fish stations based on the selected regions
-    total_zooplankton_stations <- rowSums(Filtered_Station_counts())[1]
-  }
-    valueBox(total_zooplankton_stations, "Total Zooplankton Stations", icon = icon("bug"), color = "olive")
-  })
+        total_fish_stations <- 0
+       } else {
+        total_fish_stations <- rowSums(Filtered_Station_counts())[2]
+      }
+      valueBox(total_fish_stations, 
+               "Fish Stations", 
+               icon = icon("fish"), 
+               color = "blue")
+    })
+
+    # Count total zooplankton stations
+    
+    output$countZooplankton <- renderValueBox({
+      if (is.null(Filtered_Station_counts())) {
+        total_zooplankton_stations <- 0
+      } else {
+      total_zooplankton_stations <- rowSums(Filtered_Station_counts())[1]
+      }
+      valueBox(total_zooplankton_stations, 
+               "Zooplankton Stations", 
+               icon = icon("bug"), 
+               color = "olive")
+    })
+    
     
     
     
@@ -642,65 +705,43 @@ output$countFish <- renderValueBox({
     
     
     #### Adding events for marker click ####
-    
     event <- input$BayDelta_marker_click
     id <- event$id
-    grouping <- event$group
-    selected_marker(event$id)
-    
-    #Define function to gather fish/zoop data
-    fish_zoop_data <- reactive({
-      req(selected_marker())
-      data <- Station_summary_df[Station_summary_df$Station ==selected_marker(), ]
-      return(data)
-    })
     
     
     #If nothing is selected, prompt a selection
     if (is.null(id) && is.null(event$group) && is.null(selected_marker())){
-      output$click_info <- renderText({
-      paste("Please Select a Marker")
+      output$Station_data <- renderDataTable({
+        Station_summary_df_long
         })
       output$plot <- renderPlot(NULL)
-      
+      output$Region_Click <- renderText(paste("Please Select a Marker"))
     }
     
   
         
     #If Region is selected, Region + Graph
     else if (is.null(id)){
+      selected_region(event$group)
+      output$Region_Click <- renderText({ paste(event$group)})
       
+      # generate the plot
       output$plot <- renderPlot({
-      # Your code to generate the plot
       x <- seq(0, 10, by = 0.1)
       y <- sin(x)
       plot(x, y, type = "l", col = "blue", main = "Sine Function", xlab = "x", ylab = "sin(x)")
   })
-
-      output$Region_Click <- renderText({
-      paste(event$group)
-        })
       
-      output$StationsCounts <- renderDataTable(NULL)
     }
     
     
     else{ #If station is selected, Station Number + Data
-      output$plot <- renderPlot(NULL)
-      output$StationsCounts <- renderDataTable(NULL)
+      selected_marker(event)
       output$Region_Click <- renderText({
-      paste("Station ", fish_zoop_data()$Station, "lies in the ", fish_zoop_data()$Region, "region")
+      paste("Station ", fish_zoop_data_marker()$Station[1], "lies in the ", fish_zoop_data_marker()$Region[1], "region")
       })
-      
-      output$station_click <- renderUI({
-        tags$ul(
-          tags$li(paste("Station Number", fish_zoop_data()$Station)),
-          tags$li(paste("This is a", fish_zoop_data()$Group, "observing station.")),
-          tags$li(paste("The data for taxa:", fish_zoop_data()$Taxa, "is available.")),
-          tags$li(paste("This station's collection began in", fish_zoop_data()$YearMin)),
-          tags$li(paste("This station yielded data for", fish_zoop_data()$Yeartot, "years"))
-        )
-      })
+      output$plot <- renderPlot(NULL)
+
       
     }
 
@@ -716,7 +757,7 @@ output$countFish <- renderValueBox({
           addProviderTiles(input$basemap) %>%
           setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8)
       })
-      leafletProxy("BayDelta") %>%
+      leaflet::leafletProxy("BayDelta") %>%
       addLegend(
         position = "bottomright", 
         colors = c("black", "darkred"), 
@@ -727,24 +768,25 @@ output$countFish <- renderValueBox({
     
     # Add fish markers if fish checkbox is checked
     if (show_fish) {
-      leafletProxy("BayDelta") %>%
+      leaflet::leafletProxy("BayDelta") %>%
         addCircleMarkers(
           data = fish_df_to_disp(),
           lat = ~lat, 
           lng = ~long,
           radius = 5, 
+          popup = ~paste("Station: ", Station),
           fillOpacity = 0.75, 
           stroke = FALSE,
           fillColor = 'black',
-          popup = ~paste("Station: ", Station),
           group = "Fish Station",
           layerId = ~Station 
         )
+      
     }
     
     # Add zooplankton markers if zooplankton checkbox is checked
     if (show_zooplankton) {
-      leafletProxy("BayDelta") %>%
+      leaflet::leafletProxy("BayDelta") %>%
         addCircleMarkers(
           data = zooplank_df_to_disp(),
           lat = ~Latitude,
@@ -753,14 +795,14 @@ output$countFish <- renderValueBox({
           fillOpacity = 0.75,
           stroke = FALSE,
           fillColor = 'darkred',
-          popup = ~paste("Station: ", `Station`),
+          popup = ~paste("Station: ", Station),
           group = "Zooplankton Station",
           layerId = ~Station
         )
     }
     
     # always add region centroids
-    leafletProxy("BayDelta") %>%
+    leaflet::leafletProxy("BayDelta") %>%
         addMarkers(
           data = FishStationMeanDF_to_disp(),
           lng = ~long,
@@ -771,6 +813,8 @@ output$countFish <- renderValueBox({
   
       }
   })
+  
+
 
 
   
@@ -781,10 +825,6 @@ output$countFish <- renderValueBox({
 shinyApp(ui, server)
 
 
-
 ```
 
-In all of R code chunks above the `echo = FALSE` attribute is used. This is to prevent the R code within the chunk from rendering in the document alongside the Shiny components.
-
-
-
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
