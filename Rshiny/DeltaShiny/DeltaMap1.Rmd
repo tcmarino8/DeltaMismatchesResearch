@@ -30,9 +30,9 @@ library(colourpicker)
 
 You can also embed plots, for example:
 
-```{r pressure, echo=FALSE}
+```{r doesnt really work, echo=FALSE}
 map <- leaflet() %>%
-  addProviderTiles("Stamen.Watercolor") %>%
+  addProviderTiles("Esri.WorldGrayCanvas") %>%
   setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8)
 map
 
@@ -64,7 +64,7 @@ server <- function(input, output, session) {
   # Initialize the leaflet map
   output$map <- renderLeaflet({
     leaflet() %>%
-      addTiles() %>%
+      addProviderTiles("Esri.WorldGrayCanvas") %>%
       setView(lng = -122.4, lat = 37.75, zoom = 12)
   })
   
@@ -143,13 +143,18 @@ shinyApp(ui, server)
 
 
 ```
-```{r}
+```{r Best one so far.}
 
 library(shiny)
 library(leaflet)
 library(htmlwidgets)
 library(webshot)
 library(colourpicker)
+
+sf_bay_polygon <- data.frame(
+  lng = c(-123, -121.5, -121.5, -123, -123),
+  lat = c(38, 38, 37, 37, 38)
+)
 
 # Function to add a north arrow to the map
 add_north_arrow <- function(map) {
@@ -174,8 +179,8 @@ ui <- fluidPage(
       selectInput(
             "basemap",
             "Select Basemap",
-            choices = c("OpenStreetMap", "CartoDB", "Esri.WorldStreetMap", "OpenStreetMap.HOT", "Esri.WorldImagery", "Esri.WorldGrayCanvas", "OpenStreetMap.BlackAndWhite"),
-            selected = "OpenStreetMap"
+            choices = c("Esri.OceanBasemap", "Esri.WorldImagery", "Esri.WorldGrayCanvas", "OpenStreetMap.BlackAndWhite"),
+            selected = "Esri.WorldImagery"
           )
     ),
     mainPanel(
@@ -195,9 +200,21 @@ server <- function(input, output, session) {
     leaflet() %>%
       addScaleBar(position = "topright") %>%
       addProviderTiles(input$basemap) %>%
-      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8)  # Centering the map
+      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%  # Centering the map
+
+        # add inset map
+  addMiniMap(
+    tiles = input$basemap,
+    position = 'bottomright', 
+    width = 200, height = 200,
+    toggleDisplay = FALSE,
+    zoomLevelOffset = -4
+    ) 
+    
 
   })
+  
+
   
   # Observe clicks on the map to add polygon vertices
   observeEvent(input$map_click, {
@@ -248,7 +265,7 @@ server <- function(input, output, session) {
       labels <- sapply(polygons, function(p) p$name)
       leafletProxy("map") %>%
         clearControls() %>%
-        addLegend("bottomright", colors = colors, labels = labels, opacity = 1)
+        addLegend("topleft", colors = colors, labels = labels, opacity = 1)
     }
   })
   
@@ -261,11 +278,11 @@ server <- function(input, output, session) {
       # Save leaflet map as a temporary HTML file
       tmpFile <- tempfile(fileext = ".html")
       saveWidget(leaflet() %>%
-                   setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%
+                   setView(lng = -122.167, lat = 37.9285, zoom = 8) %>%
                    clearShapes(), tmpFile)
       
       # Convert the HTML file to a PDF using webshot
-      webshot(tmpFile, file = file, cliprect = "viewport")
+      webshot(tmpFile, file = file, vwidth = 1200, vheight = 800, zoom = 3, cliprect = "viewport")
     }
   )
   
@@ -283,4 +300,261 @@ server <- function(input, output, session) {
 shinyApp(ui, server)
 
 ```
+```{r trying out to store map as object}
+
+library(shiny)
+library(leaflet)
+library(htmlwidgets)
+library(webshot)
+library(colourpicker)
+
+# Define the San Francisco Bay polygon for the inset map
+sf_bay_polygon <- data.frame(
+  lng = c(-123, -121.5, -121.5, -123, -123),
+  lat = c(38, 38, 37, 37, 38)
+)
+
+# Function to add a north arrow to the map
+add_north_arrow <- function(map) {
+  addControl(
+    map,
+    "<img src='https://clipart-library.com/images/5TRKxGRac.png' style='width: 40px;'>",
+    position = "topright",
+    className = "north-arrow"
+  )
+}
+
+ui <- fluidPage(
+  titlePanel("Interactive Polygon Drawing with Customization"),
+  sidebarLayout(
+    sidebarPanel(
+      textInput("polygon_name", "Polygon Name", value = "Polygon 1"),
+      colourInput("polygon_color", "Polygon Color", value = "blue"),
+      sliderInput("polygon_opacity", "Polygon Opacity", min = 0, max = 1, value = 0.5, step = 0.1),
+      actionButton("finish_polygon", "Finish Polygon"),
+      hr(),
+      downloadButton("download_map", "Download Map as PDF"),
+      selectInput(
+        "basemap",
+        "Select Basemap",
+        choices = c("Esri.OceanBasemap", "Esri.WorldImagery", "Esri.WorldGrayCanvas", "OpenStreetMap.BlackAndWhite"),
+        selected = "Esri.WorldImagery"
+      )
+    ),
+    mainPanel(
+      leafletOutput("map", height = 600),
+      verbatimTextOutput("polygon_coords")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Reactive value to store polygon coordinates and properties
+  polygon_coords <- reactiveVal(NULL)
+  polygons_list <- reactiveVal(list())
+
+  # Create and store the leaflet map as a reactive value
+  map_obj <- reactiveVal()
+
+  # Initialize the leaflet map
+  observe({
+    map <- leaflet() %>%
+      addScaleBar(position = "topright") %>%
+      addProviderTiles(input$basemap) %>%
+      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%
+      addMiniMap(
+        tiles = input$basemap,
+        position = 'bottomright',
+        width = 200, height = 200,
+        toggleDisplay = FALSE,
+        zoomLevelOffset = -4
+      ) %>%
+      addPolygons(
+        data = sf_bay_polygon,
+        lng = ~lng, lat = ~lat,
+        color = "red", weight = 2, opacity = 1, fillOpacity = 0.5, fillColor = "red"
+      )
+    
+    map_obj(map)
+    
+    output$map <- renderLeaflet(map)
+  })
+
+  # Observe clicks on the map to add polygon vertices
+  observeEvent(input$map_click, {
+    add_north_arrow(leafletProxy("map"))
+    click <- input$map_click
+    coords <- polygon_coords()
+    coords <- rbind(coords, c(click$lng, click$lat))
+    polygon_coords(coords)
+
+    # Update the map with the new polygon
+    leafletProxy("map") %>%
+      addPolygons(lng = coords[, 1], lat = coords[, 2],
+                  color = input$polygon_color, weight = 2, opacity = input$polygon_opacity, fillOpacity = input$polygon_opacity,
+                  fillColor = input$polygon_color)
+  })
+
+  # Finalize the polygon and add it to the polygons list
+  observeEvent(input$finish_polygon, {
+    coords <- polygon_coords()
+    if (!is.null(coords) && nrow(coords) > 2) {
+      new_polygon <- list(
+        name = input$polygon_name,
+        coords = coords,
+        color = input$polygon_color,
+        opacity = input$polygon_opacity
+      )
+      polygons <- polygons_list()
+      polygons <- append(polygons, list(new_polygon))
+      polygons_list(polygons)
+
+      # Reset the current polygon coordinates
+      polygon_coords(NULL)
+
+      # Update the map with all polygons
+      leafletProxy("map") %>%
+        clearShapes()
+
+      for (polygon in polygons) {
+        leafletProxy("map") %>%
+          addPolygons(lng = polygon$coords[, 1], lat = polygon$coords[, 2],
+                      color = polygon$color, weight = 2, opacity = polygon$opacity, fillOpacity = polygon$opacity,
+                      fillColor = polygon$color)
+      }
+
+      # Update the legend
+      colors <- sapply(polygons, function(p) p$color)
+      labels <- sapply(polygons, function(p) p$name)
+      leafletProxy("map") %>%
+        clearControls() %>%
+        addLegend("topleft", colors = colors, labels = labels, opacity = 1)
+    }
+  })
+
+  # Download map as a PDF
+  output$download_map <- downloadHandler(
+    filename = function() {
+      "map.pdf"
+    },
+    content = function(file) {
+      # Save leaflet map as a temporary HTML file
+      tmpFile <- tempfile(fileext = ".html")
+      saveWidget(map_obj(), tmpFile)
+
+      # Convert the HTML file to a PDF using webshot
+      webshot(tmpFile, file = file, vwidth = 1200, vheight = 800, zoom = 3, cliprect = "viewport")
+    }
+  )
+
+  # Display the coordinates of the current polygon
+  output$polygon_coords <- renderPrint({
+    coords <- polygon_coords()
+    if (is.null(coords)) {
+      "Click on the map to start drawing a polygon."
+    } else {
+      coords
+    }
+  })
+}
+
+shinyApp(ui, server)
+
+
+```
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r TMAP struggles without world}
+library(shiny)
+library(tmap)
+library(htmltools)
+library(webshot)
+library(colourpicker)
+
+
+
+ui <- fluidPage(
+  titlePanel("Interactive Polygon Drawing with Customization"),
+  sidebarLayout(
+    sidebarPanel(
+      textInput("polygon_name", "Polygon Name", value = "Polygon 1"),
+      colourInput("polygon_color", "Polygon Color", value = "blue"),
+      sliderInput("polygon_opacity", "Polygon Opacity", min = 0, max = 1, value = 0.5, step = 0.1),
+      actionButton("finish_polygon", "Finish Polygon"),
+      hr(),
+      downloadButton("download_map", "Download Map as PDF")
+    ),
+    mainPanel(
+      uiOutput("map")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  # Reactive value to store polygon coordinates and properties
+  polygon_coords <- reactiveVal(NULL)
+  polygons_list <- reactiveVal(list())
+  
+  # Initialize the TMAP map
+  output$map <- renderUI({
+    tmapOutput("map_tmap", height = "600px")
+  })
+  
+  output$map_tmap <- renderTmap({
+    tm_shape(world) +
+      tm_borders() +
+      tm_layout(frame = FALSE)
+  })
+  
+  # Observe clicks on the map to add polygon vertices
+  observeEvent(input$map_tmap_shape_click, {
+    click <- input$map_tmap_shape_click
+    coords <- polygon_coords()
+    coords <- rbind(coords, c(click$lng, click$lat))
+    polygon_coords(coords)
+    
+    # Update the map with the new polygon
+    tm_shape(polygon_coords()) +
+      tm_lines(col = input$polygon_color, lwd = 2, alpha = input$polygon_opacity)
+  })
+  
+  # Finalize the polygon and add it to the polygons list
+  observeEvent(input$finish_polygon, {
+    coords <- polygon_coords()
+    if (!is.null(coords) && nrow(coords) > 2) {
+      new_polygon <- list(
+        name = input$polygon_name,
+        coords = coords,
+        color = input$polygon_color,
+        opacity = input$polygon_opacity
+      )
+      polygons <- polygons_list()
+      polygons <- append(polygons, list(new_polygon))
+      polygons_list(polygons)
+      
+      # Reset the current polygon coordinates
+      polygon_coords(NULL)
+      
+      # Update the map with all polygons
+      tm_shape(do.call("rbind", lapply(polygons, function(p) p$coords))) +
+        tm_lines(col = sapply(polygons, function(p) p$color), lwd = 2, alpha = sapply(polygons, function(p) p$opacity))
+    }
+  })
+  
+  # Download map as a PDF
+  output$download_map <- downloadHandler(
+    filename = function() {
+      "map.pdf"
+    },
+    content = function(file) {
+      # Save the TMAP map as a temporary HTML file
+      tmpFile <- tempfile(fileext = ".html")
+      saveWidget(output$map_tmap, tmpFile)
+      
+      # Convert the HTML file to a PDF using webshot
+      webshot(tmpFile, file = file, cliprect = "viewport")
+    }
+  )
+}
+
+shinyApp(ui, server)
+```
