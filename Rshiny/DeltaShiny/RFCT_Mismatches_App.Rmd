@@ -1,0 +1,980 @@
+---
+title: "RFCT_Mismatches_App"
+author: "Tyler Marino"
+date: "2024-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+``` {r packages}
+
+library(patchwork)
+library(ggplot2)
+library(shiny)
+library(shinydashboard)
+library(leaflet)
+library(dplyr)
+library(readxl)
+library(sf)
+library(tidyverse)
+library(raster)
+library(sp)
+library(DT)
+library(RColorBrewer)
+
+```
+
+
+```{r Function Definitions}
+
+#Create function to make degree minutes into degrees INPUT(degree minutes) OUTPUT(degree)
+  #Ensure that if the degree is negative that you turn the minute negative aswell.
+redefine_degree <- function(degree_minute_decimal) {
+  
+  # Splitting the string into degree, (minute and decimal minute)
+  split_components <- strsplit(degree_minute_decimal, "[° ]")[[1]]
+  #Extracting degree
+  degree <- as.numeric(split_components[1])
+  if (degree < 0){
+    minute <- as.numeric(split_components[3])
+    minute <- -1*minute/60
+  }
+  else {
+    minute <- as.numeric(split_components[3])
+    minute <- minute/60
+  }
+  #Output the results
+  degree <- degree + minute
+  return (as.numeric(degree))
+  
+}
+
+change_df_degrees <- function(df){
+  
+  df$lat <- sapply(df$Latitude, redefine_degree)
+  options(digits = 20)
+  df$long <- sapply(df$Longitude, redefine_degree)
+  options(digits = 20)
+  return (df)
+  
+}
+
+
+      
+
+      # Inputs: DF with Regions, DF without Regions
+      # Output: DF_need_regions now with regions
+Find_zooplank_region <- function(df_regions, df_need_region) {
+  # Make Lat and Long columns in df_need_region
+  df_need_region$Lat <- df_need_region$Latitude
+  df_need_region$Lon <- df_need_region$Longitude
+  # Convert to a suitable PCS (in this case OSGB)
+  df_need_region <- sf::st_as_sf(df_need_region, coords=c('Lon','Lat'), crs=4326)
+  df_need_region <- sf::st_transform(df_need_region, crs=27700)
+  
+  df_regions <- st_as_sf(df_regions, coords=c('long','lat'), crs=4326)
+  df_regions <- st_transform(df_regions, crs=27700)
+  
+  # Extract Voronoi polygons around locations and convert to an sf object
+  loc_voronoi <- st_collection_extract(st_voronoi(do.call(c, st_geometry(df_regions))))
+  loc_voronoi <- st_sf(loc_voronoi, crs=raster::crs(df_regions))
+
+# Match Voronoi polygons to locations and select that geometry
+  df_regions$voronoi <-   loc_voronoi$loc_voronoi[unlist(st_intersects(df_regions, loc_voronoi))]
+  st_geometry(df_regions) <- 'voronoi'
+
+# Find which Region each Zooplankton element should belong to
+  df_need_region$Region <- df_regions$Region[unlist(st_intersects(df_need_region, df_regions))]
+
+  return (df_need_region)
+}
+
+#Will create a df to get the mean values of each location.
+GetMeanRegionDF <- function(df) {
+  mean_df <- df %>%
+                group_by(Region) %>%
+                summarise(across(c(lat, long), mean))
+  return (mean_df)
+}
+
+
+#### PLOTS #####
+
+### Phenology of Risk ###
+      #Input: TaxaInput (list), RegionInput (list)  
+      #Ouptput: Phenology of Risk Plots in a grid
+make_phenologyOR_plots <- function(taxa_list, region_list) {
+  plots_phenology_of_risk <- list()
+  for (taxa in taxa_list) {
+    taxa_specific <- phenology_of_risk_data %>% filter(Taxa == taxa)
+    taxa_region_specific <- taxa_specific %>% filter(Region %in% region_list)
+    
+    plot <- taxa_region_specific %>% ggplot()+
+      geom_line(aes(x=MonthName, y=Probability, color=Region, group=interaction(Taxa, Region), alpha=Window), linewidth=1.5)+
+      geom_point(aes(x=MonthName, y=Probability, color=Region, group=interaction(Taxa, Region), alpha=Window, size=Percenttot))+
+      scale_alpha_manual(values = alphas) +
+      guides(scale = TRUE, alpha = FALSE, size = guide_legend(title = "Percent of annual catch")) +
+      labs(title = SpeciesNamesSciNorm[taxa])+
+      labs(subtitle = taxa)+
+      theme_classic() +ylab("Critical Decline Risk (%)") +xlab("Month") +ylim(0,100)+
+      scale_color_manual(values = COLORS) +   guides(color="none", shape="none", size="none")+  
+      theme(text = element_text(size = 20))
+  
+    plots_phenology_of_risk[[taxa]] <- plot
+    
+  }
+  
+  patchwork <- wrap_plots(plots_phenology_of_risk, ncol = 3, guides = 'collect')
+  return (patchwork)
+}
+
+
+### Single year Prediction Risk plots ###
+      #Input: taxaInputs, regionInputs
+      #Output: patchwork of plots.
+make_1year_risk_plot <- function(taxaInput, regionInput) {
+  plots <- list()
+  for (taxa in taxaInput) {
+    taxa_spec_data <- FishZoopComparison_data %>% filter(Predator == SpeciesNamesSciNorm[taxa]) %>% filter(Timesteps == 1)  %>% filter(Region %in% regionInput)
+    taxa_spec_data$Region<-factor(taxa_spec_data$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay"))
+    taxa_spec_data$Taxa<-as.factor(taxa_spec_data$Taxa)
+    #taxa_spec_data$Taxa <- relevel(taxa_spec_data$Taxa, taxa)
+    for (region in unique(taxa_spec_data$Region)) {
+      taxa_region_spec_data <- taxa_spec_data %>% filter(Region == region)
+      plot <- taxa_region_spec_data%>% ggplot(aes(x=Taxa, y=Probability))+
+        geom_point(aes(color=Region), size=3, position = pd)+
+        geom_linerange(aes(ymin=Best, ymax=Worst, group=Region, color=Region, linetype=Group),size=1, position = pd)+
+        ylab("Key Window Probability")+
+        theme_classic()+
+        scale_x_discrete(guide = guide_axis(angle = 30))+
+        ylim(0,100)+ guides(color="none", shape="none", linetype="none")+
+        labs(title = paste0(SpeciesNamesSciNorm[taxa], ', ', region))+
+        ylab("Critical Decline Risk (%)")+
+        xlab("Fish and Potential Zoop. Prey")+
+        scale_color_manual(values = COLORS)+
+        scale_linetype_manual(values = LINES)+  theme(axis.title.x=element_blank(), axis.title.y=element_blank()) +
+        theme(text = element_text(size = 25))+ theme(plot.title = element_text(size=25)) + geom_vline(xintercept = 1.5, linetype="dotted", 
+                                                                                                      color = "black", size=1.5)
+    
+      plots[[paste0(SpeciesNamesSciNorm[taxa], ', ', region)]] <- plot
+    }
+  }
+  patchwork <- wrap_plots(plots, ncol = 4, guides = 'collect')
+  return (patchwork)
+}
+
+
+
+### 10 Year Prediction Risk Plots ###
+        #Input: Taxas Selected(list), Regions Selected (list)
+        #Output: All plots in a grid to show the Region Taxa Pairing graphs for
+make_10year_prediction_plot <- function(taxaInput, regionInput) {
+  plots <- list()
+  for (taxa in taxaInput) {
+    taxa_spec_data <-Predict10yrData %>% filter(Predator== SpeciesNamesSciNorm[taxa]) %>% filter(Region %in% regionInput)
+    Predict10yrData$Region <- factor(Predict10yrData$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay"))
+    taxa_spec_data<-taxa_spec_data %>%
+      group_by(Region, Timesteps, Group) %>% unique() %>%
+      mutate(Meanprob=mean(Probability))%>% 
+      mutate(Meanbest=mean(Best))%>%
+      mutate(Meanworst=mean(Worst))
+
+    for (region in unique(taxa_spec_data$Region)) {
+      taxa_region_spec_data <- taxa_spec_data %>% filter(Region == region)
+      plot <- taxa_region_spec_data %>% ggplot()+
+        geom_line(aes(x=Timesteps, y=Meanprob, color=Region, linetype=Group), linewidth=2)+
+        geom_ribbon(aes(x=Timesteps, ymin=Meanbest, ymax=Meanworst, fill=Region, group=(interaction(Group, Region))), alpha=0.05, size=2)+
+        theme_classic() +ylab("Critical Decline Risk (%)") +xlab("Years From Present") +ylim(0,100) + scale_x_continuous(breaks=seq(1,10,1))+
+        theme(text = element_text(size = 25))+
+        scale_color_manual(values = COLORS)+
+        scale_fill_manual(values = COLORS)+
+        scale_linetype_manual(values = LINES)+ theme(axis.title.x=element_blank(), axis.title.y=element_blank()) + theme(plot.title = element_text(size=25)) +
+        labs(title = paste0(SpeciesNamesSciNorm[taxa], ', ', region))+guides(color="none", linetype="none", fill="none")
+    
+      plots[[paste0(SpeciesNamesSciNorm[taxa], ', ', region)]] <- plot
+    }
+  }
+  patchwork <- wrap_plots(plots, ncol = 4, guides = 'collect')
+  return (patchwork)
+}
+
+```
+
+``` {r Set Working Dir}
+
+setwd("C:\\Users\\Tyler Marino\\OneDrive\\Desktop\\RuhiProject\\Rshiny\\DeltaShiny")
+
+```
+
+
+
+
+```{r Data Processing, echo=FALSE}
+
+
+#### For Station Metadata table ####
+
+        #Get Station Summary data for Fish Stations
+Station_summary_df_long <- read.csv("StationPoints\\Stationsummary.csv")
+Station_summary_df_long$Region[Station_summary_df_long$Region == "South"] <- "South Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "Central"] <- "Central Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "Suisun"] <- "Suisun Bay"
+Station_summary_df_long$Region[Station_summary_df_long$Region == "San Pablo"] <- "San Pablo Bay"
+
+
+        #Groupby station number, list the results
+Station_summary_df <- Station_summary_df_long %>% group_by(Station) %>%
+    summarise_all(list(unique = ~list(unique(.))))
+
+        #Rename the columns to fit the standard names, not xxx_unique
+unique_names <- colnames(Station_summary_df)[-1]
+renames <- c("Group", "Taxa", "Region", "YearMin", "YearMax", "Yeartot", "MeanCPUE", "Occurences")
+
+new_names_list <- setNames(renames, unique_names)
+Station_summary_df <- Station_summary_df %>% rename_with(~new_names_list[.x], .cols = all_of(unique_names))
+
+      #Add Latitude and Longitude to Station_summary_df
+tester_Station_summary_df <- left_join(x = Station_summary_df, y = fish_stations_df, join_by('Station' == 'Station Number'))
+tester_Station_summary_df <- left_join(x = Station_summary_df, y = zooplank_stations_df, by = 'Station')
+?join_by
+      #Split it up  fish and Zooplankton stations 
+Fish_station_summary_df <- Station_summary_df %>% filter(Group == "Fish")
+Zoop_station_summary_df <- Station_summary_df %>% filter(Group == "Zoop")
+
+
+
+
+
+#### Gathering Overall sataion data ###
+
+        # Read Excel and CSV files
+if (file.exists("StationPoints\\StationPoints1.xlsx")) {
+  fish_stations_df <- read_excel("StationPoints\\StationPoints1.xlsx")
+  cat("Successfully read StationPoints1.xlsx\n")
+} else {
+  cat("File StationPoints1.xlsx does not exist.\n")
+}
+
+if (file.exists("StationPoints\\ZooplanktonStationsData.csv")) {
+  zooplank_stations_df <- read.csv("StationPoints\\ZooplanktonStationsData.csv")
+  cat("Successfully read ZooplanktonStationsData.csv\n")
+} else {
+  cat("File ZooplanktonStationsData.csv does not exist.\n")
+}
+
+
+      
+
+      # reading risk data file
+if (file.exists("RiskData\\Fish_risk_5-15.csv")) {
+  RiskData <- read.csv("RiskData\\Fish_risk_5-15.csv")
+  cat("Successfully read Fish_risk_5-15.csv\n")
+} else {
+  cat("File Fish_risk_5-15.csv does not exist.\n")
+}
+
+
+
+#### Continue with data manipulation ####
+
+        #Add lat and long to df
+fish_stations_df <- change_df_degrees(fish_stations_df)
+
+        #change area of interest column name to 'Region'
+fish_stations_df <- fish_stations_df %>% 
+       dplyr::rename("Region" = "Area of Interest")
+
+
+#### Filtering for only our stations from all stations ####
+
+our_fishstations_df <- fish_stations_df %>% dplyr::filter(`Station Number` %in% Fish_station_summary_df$Station)
+our_fishstations_df <- our_fishstations_df %>% rename("Station" = "Station Number")
+our_zoopstations_df <- zooplank_stations_df %>% dplyr::filter(`Station` %in% Zoop_station_summary_df$Station)
+
+
+        ##remove NAs from the data
+fish_stations_df <- na.omit(fish_stations_df)
+zooplank_stations_df <- na.omit(zooplank_stations_df)
+
+        #Find zooplankton stations regions 
+zooplank_stations_df <- Find_zooplank_region(fish_stations_df, zooplank_stations_df)
+
+       #Update regions for one suisun bay and one delta
+fish_stations_df$Region[fish_stations_df$Region == "East Suisun Bay"] <- "Suisun Bay"
+fish_stations_df$Region[fish_stations_df$Region == "West Suisun Bay"] <- "Suisun Bay"
+fish_stations_df$Region[fish_stations_df$Region == "Lower Sacramento River"] <- "Delta"
+fish_stations_df$Region[fish_stations_df$Region == "Lower San Joaquin River"] <- "Delta"
+zooplank_stations_df$Region[zooplank_stations_df$Region == "East Suisun Bay"] <- "Suisun Bay"
+zooplank_stations_df$Region[zooplank_stations_df$Region == "West Suisun Bay"] <- "Suisun Bay"
+zooplank_stations_df$Region[zooplank_stations_df$Region == "Lower Sacramento River"] <- "Delta"
+zooplank_stations_df$Region[zooplank_stations_df$Region == "Lower San Joaquin River"] <- "Delta"
+
+
+
+
+
+#### For the main Map Markers ####
+
+        #Mean points for regions
+FishStationMeanDF <- GetMeanRegionDF(fish_stations_df)
+
+
+
+
+
+#### For Shiny App indexing ####
+
+        #Create list of unique station regions
+station_regions <- unique(fish_stations_df$Region)
+Zooplank_station_regions <- unique(zooplank_stations_df$Region)
+
+       #Create inputs for selecting boxes
+station_regions_boxes <-  c("Select All", station_regions)
+Zooplank_station_region_boxes <- c("Select All", Zooplank_station_regions)
+
+#Reference names scientific = civilian
+SpeciesNamesSciNorm <- c("Engraulis mordax" = 'Northern anchovy', "Atherinopsis californiensis" = 'Jack Silverside', "Clupea pallasii" = 'Pacific herring', "Alosa sapidissima" = 'American shad', "Spirinchus thaleichthys" = 'Longfin smelt', "Morone saxatilis" = 'Striped bass', "Dorosoma petenense" = 'Threadfin shad')
+
+#Get Taxa Options
+TaxaOptions <- unique(RiskData$Taxa)
+
+
+
+##### Preparing data for Phenology of Risk plot ######
+
+            #renmaing to simpler month identifiers.
+phenology_of_risk_data <- RiskData %>% mutate(MonthName = factor(MonthName, levels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")))
+
+            #region clarification
+phenology_of_risk_data$Region<-dplyr::recode(phenology_of_risk_data$Region, "Sanpablo" = "San Pablo Bay", "Suisun" = "Suisun Bay", "Delta" = "Delta", "Confluence" = "Confluence", "Central" = "Central Bay", "South" = "South Bay")
+            
+            #Refactoring regions
+phenology_of_risk_data$Region<-factor(phenology_of_risk_data$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay", "Central Bay", "South Bay"))
+
+
+            #Filter for valuable regions
+phenology_of_risk_data<-phenology_of_risk_data %>% filter(Region %in% c("Delta", "Confluence", "Suisun Bay", "San Pablo Bay"))
+
+
+
+# Data for Phenology of Risk plot 
+FishZoopComparison_data <- read.csv("FishandzoopConcise.csv")
+
+
+#Data For 10yr plot
+Predict10yrData <- read.csv("Fishandzoop.csv")
+Predict10yrData <- Predict10yrData  %>% filter(Region %in% c("San Pablo Bay", "Suisun Bay", "Confluence", "Delta"))
+Predict10yrData$Region <- factor(Predict10yrData$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay"))
+
+
+#Necessary filler information for plots
+
+pd <- position_dodge(1)
+
+alphas<- c("Key" = 1, "Off" = .3)
+
+SHAPES <- c("San Pablo Bay" = 17, "Suisun Bay" = 16, "Delta" = 18, "Confluence" = 15)
+
+LINES <- c("Fish" = 1, "Zoop" = 2)
+
+COLORS  <- c("Delta" = "#1B9E77", 
+             "Confluence" = "#D95F02",
+             "Suisun Bay" = "#7570B3",
+             "San Pablo Bay" = "#E7298A")
+
+```
+
+``` {r}
+#Test Plotting Functions
+test1 <- make_1year_risk_plot(TaxaOptions, c('Delta', 'Suisun Bay'))
+
+test10 <- make_10year_prediction_plot(TaxaOptions, c('Suisun Bay'))
+
+testPOR <- make_phenologyOR_plots(TaxaOptions, c('Delta', 'Suisun Bay'))
+
+```
+
+
+
+
+
+```{r ShinyApp Best 7/29}
+ui <- fluidPage(
+  titlePanel("Bay Delta Mismatch Findings"),
+
+  fluidRow(
+    column(width = 3,
+        sidebarPanel(
+          style = "width: 170px;",
+           #Check box for fish Stations
+          checkboxInput(
+            "fish",
+            "Display Fish Stations",
+            TRUE
+          ),
+
+          #Check box for zooplankton Stations
+          checkboxInput(
+            "zooplankton",
+            "Display Zooplankton Stations",
+            TRUE
+          ),
+
+          #Horizontal Line
+          hr(),
+
+          #Check boxes for regions
+          checkboxGroupInput(
+            'region',
+            'Select Regions',
+            choices = station_regions_boxes,
+            selected = station_regions_boxes
+          ),
+          # Conditional panel to show taxa selection only on the "Phenology" tab
+          conditionalPanel(
+            condition = " input.tabs == 'Phenology of Risk' || input.tabs == '10yr Decline Prob' || input.tabs == '1yr Decline Prob' ",
+            checkboxGroupInput(
+              'TaxaInput',
+              'Select Taxa',
+              choices = Zooplank_station_region_boxes,
+              selected = Zooplank_station_region_boxes
+            )
+          ),
+
+              # Select input for basemap
+          conditionalPanel(
+            condition = "input.tabs == 'Map'",
+            selectInput(
+              "basemap",
+              "Select Basemap",
+              choices = c("OpenStreetMap", "CartoDB", "Esri.WorldStreetMap", "OpenStreetMap.HOT"),
+              selected = "OpenStreetMap"
+          )
+          )
+
+          )
+      ),
+    column(width = 9,
+
+    mainPanel(
+      style = "width: calc(100% - 100px);",
+      tabsetPanel( id = "tabs",
+        tabPanel("Map",
+          column(width=8,
+            leafletOutput("BayDelta"),                   #MapDisplay
+            wellPanel(
+              textOutput("Region_Click")                 #Region Output
+            ),
+            verbatimTextOutput("StationsCounts")        #StationCounts
+            ),
+          column(width = 4,
+            valueBoxOutput("countFish"),                 #Fish stations counts
+            valueBoxOutput("countZooplankton")           #Zooplankton stations counts
+            #valueBoxOutput("TaxaExist")                 #Show existing Taxa
+                )
+        ),
+        
+        
+        
+####################*******************************************#################################
+        ##Phenology of risk for each species based on region
+        tabPanel("Phenology of Risk",
+                 fluidRow(
+                   plotOutput("Plot1", width = "100%", height = "900px")
+                   )
+                 ),
+#         
+# ####################*******************************************#################################
+        # 1 year prdictions of critical decline probability
+        tabPanel("1yr Decline Prob",
+                 fluidRow(
+        #            textOutput("NoCentral"),
+        #            textOutput("NoSouth"),
+        #            plotOutput("Plots2", width = "100%", height = "1600px")
+                   )
+                 ),
+# 
+# ####################*******************************************################################# 
+        # #10 year predictions of critical decline probability
+        # tabPanel("10yr Decline Prob",
+        #          fluidRow(
+        #            textOutput("NoCentral"),
+        #            textOutput("NoSouth"),
+        #            plotOutput("Plots2", width = "100%", height = "1600px")
+        #            )
+        #          ),
+        # 
+        # 
+        # #Station datatable displayed
+        # tabPanel("Meta Data",
+        #         fluidRow(
+        #           dataTableOutput("Station_data")
+        #           )
+        #         ),
+        
+        tabPanel("Information/Methods",
+          fluidRow(
+
+                  )
+              )
+
+        )
+      )
+    )
+  ),
+  
+  tags$script(
+        "
+    // Custom JavaScript to display popup on hover
+    Shiny.addCustomMessageHandler('showPopupOnHover', function(data) {
+      var map = document.getElementById('BayDelta')._leaflet;
+      if (map) {
+        map.eachLayer(function(layer) {
+          if (layer instanceof L.CircleMarker || layer instanceof L.Marker) {
+            layer.on('mouseover', function (e) {
+              layer.openPopup();
+            });
+            layer.on('mouseout', function (e) {
+              layer.closePopup();
+            });
+          }
+        });
+      }
+    });
+    "
+  )
+
+)
+
+
+
+
+
+
+server <- function(input, output, session) {
+
+  
+  
+  ######                  PLOTS                   ######
+                  ### Phenology of Risk plot ###
+  
+  
+  
+  # Graph1data <- reactive({
+  #   req(input$region)
+  #   req(input$Taxa)
+  #   graphData1 |> dplyr::filter(
+  #     if ("Select All" %in% input$region) 
+  #       {Region %in% station_regions} 
+  #     else 
+  #      {Region %in% input$region},
+  #     if ("Select All" %in% input$Taxa)
+  #       {Taxa %in% TaxaOptions} 
+  #     else 
+  #      {Taxa %in% input$Taxa}
+  #   )
+  # })
+  
+                          #####Plot2####
+   ### Function to retrieve the plots based on selected taxa
+  # 
+  # selected_plots <- reactive({
+  #   req(input$Taxa)
+  #   req(input$region)
+  #   
+  #   if ("Central Bay" %in% input$region){
+  #       output$NoCentral <- renderText("There are no species observed in the Central Bay for this figure")}
+  #   if ("South Bay" %in% input$region){
+  #       output$NoSouth <- renderText("There are no species observed in the South Bay for this figure")}
+  #   
+  #   graph_capitals <- graph_capitals %>% dplyr::filter(
+  #     if ("Select All" %in% input$region) 
+  #     {Region %in% station_regions} 
+  #     else 
+  #       {Region %in% input$region}
+  #   )
+  #   # List to store plots
+  #   plots2 <- list()
+  #   # Create and store plots
+  #   for (predator in TaxaOptions) {
+  #     predator <- ScienceNameDictionary[predator]
+  #     plots2[[predator]] <- create_plot2(predator, PredatorNamesDictionary, graph_capitals)
+  #   }
+  # 
+  #   # Add guide_area for collective guides
+  #   #plots2 <- c(plots, list(guide_area()))
+  #   toupper(TaxaOptions)
+  #   if ("Select All" %in% input$Taxa) {
+  #     plots2
+  #   } else {
+  #     plots2[toupper(PredatorNamesDictionary[names(plots2)]) %in% toupper(input$Taxa)]
+  #   }
+  #   
+  # })
+  # 
+   # Helper function to calculate plot height
+  plot_height <- reactive({
+    num_plots <- length(selected_plots())
+    if (num_plots == 0) {
+      return(400)  # Default height when there are no plots
+    } else {
+      return(ceiling(num_plots / 3) * 400)  # Adjust height based on number of plots
+    }
+  })
+
+  ### Render plots for the "PredatorPrey10year" tab
+  # output$Plots2 <- renderPlot({
+  #   plot_list <- selected_plots()
+  #   if (length(plot_list) == 0) return(NULL)
+  #   cowplot::plot_grid(plotlist = plot_list, ncol = 3)
+  # 
+  # }, height = plot_height)
+
+
+  
+  
+  
+                  #### Trimming Data Sets based on inputs ####
+  
+                  #Clip the fish df based on region
+    
+  fish_df_to_disp <- reactive({
+    req(input$region)
+    our_fishstations_df |> dplyr::filter(
+      if ("Select All" %in% input$region) 
+        {Region %in% station_regions} 
+      else 
+        {Region %in% input$region}
+    )
+  })
+  
+                  #Clip the zooplankton df based on region
+    
+  zooplank_df_to_disp <- reactive({
+    req(input$region)
+    our_zoopstations_df |> dplyr::filter(
+      if ("Select All" %in% input$region) 
+        {Region %in% Zooplank_station_regions} 
+      else 
+        {Region %in% input$region}
+    )
+  })
+  
+                 #Filter the meanLocation df based on region
+  
+  FishStationMeanDF_to_disp <- reactive({
+    req(input$region)
+    FishStationMeanDF |> dplyr::filter(
+      if ("Select All" %in% input$region) 
+        {Region %in% station_regions} 
+      else 
+        {Region %in% input$region}
+    )
+  })
+  
+                  ### Filter the station regions  ###s
+  
+  Filtered_Station_counts <- reactive({
+    req(input$region)
+    station_counts <- subset(station_counts, select = -`Total Stations Zoop > Fish`)
+    if ("Select All" %in% input$region) {
+      sapply(station_counts, as.numeric)
+    } else {
+      sapply(subset(station_counts, select = names(station_counts) %in% input$region), as.numeric)
+    }
+  })
+  
+      #Define function to gather fish/zoop data based on marker
+    fish_zoop_data_marker <- reactive({
+      req(input$BayDelta_marker_click)
+      
+      event <- input$BayDelta_marker_click
+      id <- event$id
+      grouping <- event$group
+      selected_marker(event$id)
+      
+      data <- Station_summary_df_long[Station_summary_df_long$Station ==selected_marker(), ]
+      return(data)
+    })
+    
+          #Define function to gather fish/zoop data based on marker region
+    fish_zoop_data_region_marker <- reactive({
+      req(input$BayDelta_marker_click)
+    
+        event <- input$BayDelta_marker_click
+        selected_marker(event$id)
+        data <- Station_summary_df_long[Station_summary_df_long$Region ==event$group, ]
+  
+      
+      return(data)
+    })
+    
+              #Define function to gather fish/zoop data based on region box
+  metadata_box <- reactive({
+    req(input$region)
+    
+    data <- Station_summary_df_long %>%
+      dplyr::filter(
+        if ("Select All" %in% input$region) {
+          Region %in% Zooplank_station_regions
+        } else {
+          Region %in% input$region
+        }
+      )
+          # Check if both checkboxes are unchecked or both are checked
+      if ((!input$fish && !input$zooplankton) || (input$fish && input$zooplankton)) {
+        return(data)  # Return full data in these cases
+      }
+    
+    # Filter by fish and zooplankton input
+    if (input$fish) {
+      data <- data %>% dplyr::filter(Group == "Fish")
+    } else if (input$zooplankton) {
+      data <- data %>% dplyr::filter(Group == "Zoop")
+    }
+    
+      return(data)
+  })
+  
+    
+  ######                  Create Map                  ######
+                       ###Main output Bay Delta Map###
+    output$BayDelta <- renderLeaflet({
+      leaflet::leaflet(FishStationMeanDF_to_disp()) %>%
+      addProviderTiles(input$basemap) %>%
+      setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8) %>%
+      addMarkers(
+        lng = ~long,
+        lat = ~lat,
+        label = ~Region
+      )
+  })
+    
+                    #Add Legend before
+    observe({
+      leaflet::leafletProxy("BayDelta") %>%
+        addLegend(
+          position = "bottomright", 
+          colors = c("black", "darkred"), 
+          labels = c("Fish Stations", "Zooplankton Stations"), 
+          opacity = 1 
+        )
+     })
+    
+                  #Prompt a marker to be selected
+    output$click_info <- renderText({
+      paste("Please Select a Marker")
+        })
+    
+    output$Station_data <- renderDataTable({fish_zoop_data()})
+  
+
+                  #No initial marker/region
+  selected_marker <- reactiveVal(NULL)
+  selected_region <- reactiveVal(NULL)
+
+
+  
+               #### Observing a Click ####
+    observeEvent(c(input$fish, input$zooplankton, input$region, input$basemap, input$BayDelta_marker_click), {
+      
+    observeEvent(c(input$fish, input$zooplankton, input$region, input$basemap), {
+      selected_marker(NULL)
+      output$Station_data <- renderDataTable({metadata_box()})
+    })
+      
+      show_fish <- input$fish
+      show_zooplankton <- input$zooplankton
+      
+      ###Display Graph 2(Predator Prey 10 year) || We will not change df based on input, but rather just the plots to be shown
+      #plots_for_plot2 <- plots2[input$Taxa]
+      
+      
+      
+      
+  ######                  PLOTS                   ######
+                  ### Phenology of Risk plot ###
+  
+  output$plot1 <- make_phenologyOR_plots(input$TaxaInput, input$region)
+      
+      
+      
+      
+      
+      
+      ##Display what Taxa Exist in the Given Region upon click on region##
+      
+      # output$TaxaExist <- renderValueBox({
+      #   valueBox("Taxa in Selected Region", paste(unique(Graph1data()$Taxa), collapse = ";\n\n"))
+      # })
+    
+      
+        ######  Render the station counts Feature #######
+      ## Calculate the total count of fish stations based on the selected regions ##
+    output$countFish <- renderValueBox({
+      if (is.null(Filtered_Station_counts())) {
+        total_fish_stations <- 0
+       } else {
+        total_fish_stations <- rowSums(Filtered_Station_counts())[2]
+      }
+      valueBox(total_fish_stations, 
+               "Fish Stations", 
+               # icon = icon("fish"), 
+               color = "blue")
+    })
+    ##    Count total zooplankton stations    ##
+    output$countZooplankton <- renderValueBox({
+      if (is.null(Filtered_Station_counts())) {
+        total_zooplankton_stations <- 0
+      } else {
+      total_zooplankton_stations <- rowSums(Filtered_Station_counts())[1]
+      }
+      valueBox(total_zooplankton_stations, 
+               "Zooplankton Stations", 
+               # icon = icon("bug"), 
+               color = "olive")
+    })
+    
+    
+    # Clear existing markers
+    leafletProxy("BayDelta") %>%
+    clearMarkers()
+    
+    
+    #### Adding events for marker click ####
+    event <- input$BayDelta_marker_click
+    id <- event$id
+    
+    #If nothing is selected, prompt a selection
+    if (is.null(id) && is.null(event$group) && is.null(selected_marker())){
+      output$Station_data <- renderDataTable({
+        Station_summary_df_long
+        })
+      output$plot <- renderPlot(NULL)
+      output$Region_Click <- renderText(paste("Please Select a Marker"))
+    }
+  
+        
+    #If Region is selected, Region + Graph
+    else if (is.null(id)){
+      selected_region(event$group)
+      output$Region_Click <- renderText({ paste(event$group)})
+      
+      # generate the plot
+      output$plot <- renderPlot({
+      x <- seq(0, 10, by = 0.1)
+      y <- sin(x)
+      plot(x, y, type = "l", col = "blue", main = "Sine Function", xlab = "x", ylab = "sin(x)")
+  })
+      
+    }
+    
+     #If station is selected, Station Number + Data
+    else{
+      selected_marker(event)
+      output$Region_Click <- renderText({
+      paste("Station ", fish_zoop_data_marker()$Station[1], "lies in the ", fish_zoop_data_marker()$Region[1], "region")
+      })
+      output$plot <- renderPlot(NULL)
+
+      
+    }
+
+  
+    
+    
+   ####Checking the Sidebar selections####
+       
+    # Check if no region is selected
+    if (length(input$region) == 0) {
+      output$BayDelta <- renderLeaflet({
+        leaflet() %>%
+          addProviderTiles(input$basemap) %>%
+          setView(lng = -122.1670034591194991, lat = 37.928549685534591163, zoom = 8)
+      })
+      leaflet::leafletProxy("BayDelta") %>%
+      addLegend(
+        position = "bottomright", 
+        colors = c("black", "darkred"), 
+        labels = c("Fish Stations", "Zooplankton Stations"), 
+        opacity = 1 
+      )
+    } else {
+    
+    # Add fish markers if fish checkbox is checked
+    if (show_fish) {
+      leaflet::leafletProxy("BayDelta") %>%
+        addCircleMarkers(
+          data = fish_df_to_disp(),
+          lat = ~lat, 
+          lng = ~long,
+          radius = 5, 
+          popup = ~paste0(
+          "<b>Station Number:</b> ", `Station`, "<br>",
+          "<b>Region:</b> ", Region),
+          popupOptions = popupOptions(closeButton = TRUE, autoClose = FALSE),
+          fillOpacity = 0.75, 
+          stroke = FALSE,
+          fillColor = 'black',
+          group = "Fish Station",
+          layerId = ~Station 
+        )
+      
+    }
+    
+    # Add zooplankton markers if zooplankton checkbox is checked
+    if (show_zooplankton) {
+      leaflet::leafletProxy("BayDelta") %>%
+        addCircleMarkers(
+          data = zooplank_df_to_disp(),
+          lat = ~Latitude,
+          lng = ~Longitude,
+          radius = 4,
+          fillOpacity = 0.75,
+          stroke = FALSE,
+          fillColor = 'darkred',
+          popup = ~paste0(
+          "<b>Station Number:</b> ", `Station`, "<br>",
+          "<b>Region:</b> ", Region),
+          popupOptions = popupOptions(closeButton = TRUE, autoClose = FALSE),
+          group = "Zooplankton Station",
+          layerId = ~Station
+        )
+    }
+    
+    # always add region centroids
+    leaflet::leafletProxy("BayDelta") %>%
+        addMarkers(
+          data = FishStationMeanDF_to_disp(),
+          lng = ~long,
+          lat = ~lat,
+          label = ~Region,
+          group = ~Region
+        )
+  
+    }
+    
+    observe({
+      session$sendCustomMessage("showPopupOnHover", list())
+    })
+  })
+  
+
+
+
+  
+  
+}
+
+#Call the shiny app
+shinyApp(ui, server)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
