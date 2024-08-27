@@ -7,8 +7,8 @@ output: html_document
 
 ```{r knitOptions}
 
-knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_chunk$set(root.dir = normalizePath("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\DeltaShiny"))
+knitr::opts_chunk$set(echo = FALSE)
+#knitr::opts_chunk$set(root.dir = normalizePath("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\DeltaShiny"))
 
 ```
 
@@ -31,17 +31,14 @@ library(RColorBrewer)
 library(rsconnect)
 
 
+
 getwd()
 
 #setwd("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\DeltaShiny")
 ```
 
 ```{r Deploy App}
-setwd("C:\\Users\\Tyler Marino\\Documents\\GitHub\\RuhiBusiness\\DeltaShiny")
 
-rsconnect::setAccountInfo(name='12022001delta', token='74149036116CAD52177D1FDE7300C117', secret='8dGpPLVs8WnCRdo5iNDu+7WI2qJBg+1cuSVmXci/')
-
-rsconnect::deployApp("RFCT_Mismatches")
 
 ```
 
@@ -92,7 +89,7 @@ station_regions_boxes <-  c("Select All", station_regions)
 
 
 #Reference names scientific = civilian
-SpeciesNamesSciNorm <- c("Engraulis mordax" = 'Northern anchovy', "Atherinopsis californiensis" = 'Jack Silverside', "Clupea pallasii" = 'Pacific herring', "Alosa sapidissima" = 'American shad', "Spirinchus thaleichthys" = 'Longfin smelt', "Morone saxatilis" = 'Striped bass', "Dorosoma petenense" = 'Threadfin shad')
+SpeciesNamesSciNorm <- c("Engraulis mordax" = 'Northern anchovy', "Atherinopsis californiensis" = 'Jack silverside', "Clupea pallasii" = 'Pacific herring', "Alosa sapidissima" = 'American shad', "Spirinchus thaleichthys" = 'Longfin smelt', "Morone saxatilis" = 'Striped Bass', "Dorosoma petenense" = 'Threadfin shad')
 
 #Get Taxa Options
 TaxaOptions <- unique(RiskData$Taxa)
@@ -123,6 +120,13 @@ COLORS  <- c("Delta" = "#1B9E77",
              "Suisun Bay" = "#7570B3",
              "San Pablo Bay" = "#E7298A")
 
+legend_spec_POR <- list(
+  list(label = "Delta", color = "#1B9E77"),
+  list(label = "Confluence", color = "#D95F02"),
+  list(label = "Suisun Bay", color = "#7570B3"),
+  list(label = "San Pablo Bay", color = "#E7298A")
+  
+)
 
 
 #Information on each plot
@@ -133,9 +137,13 @@ SingleYearPredicitons_blurb <- "Mean critical decline risk of fish predators dur
 
 TenYearPredictions_blurb <- "Critical decline risk projected out 10 years from present for fish predators (solid line) in their high population window and the mean risk of their zooplankton prey assemblage (dashed line) during that same window. Bands represent the range between best case and worst case scenarios. Asterisks represent significant differences between fishes and zooplankton."
 
-MetaData_Blurb <- "This Station Data "
+MetaData_Blurb <- "This Station Data table has stations as a unique row, and the following columns are associated metadata. The search bar on the top right allows for ease of search for species or stations. 
 
-Map_blurb <- "This map shows... "
+The metadata is as follows: (Taxa: species surveyed up at each station), (Region), (YearMin: First year each taxa was identified. In order of taxa appearance), (YearMax: Most Recent year each taxa was identified. In order of taxa appearance), (Mean CPUE: Mean Catch Per Unit Effort), (Occurances: Number of Non-Zero encounters)
+"
+
+Map_blurb <- "This map plots the station locations of which we use for our data collection for our modeling. The black circles are the fish stations. The maroon circles are the zooplankton stations. The orange circles are centroids of the region which carry no data aside from the region they represent. Each data point can be hovered over to see the station number and the region it belongs to. Please reference the Map Meta Data Table Tab for more information and use the search bar after you find your stations of interest."
+
 
 ```
 
@@ -146,17 +154,20 @@ ui <- fluidPage(
   fluidRow(                                                        
     div( style = "width: 30%; float: left; box-sizing: border-box;",                                   #Left hand side Tab Bar
       sidebarPanel(
-        checkboxInput(                                                                                 #Check box for Fish Stations
+        conditionalPanel(
+          condition = "input.Tabs =='Map' || input.Tabs == 'Map Meta Data'",
+          checkboxInput(                                                                                 #Check box for Fish Stations
           "fish",
           "Display Fish Stations",
           TRUE
+          ),
+          checkboxInput(                                                                                 #Check Box for Zooplankton Stations
+            "zooplankton",
+            "Display Zooplankton Stations",
+            TRUE
+          ),
+          hr(),                                                                                          #Horizontal Line
         ),
-        checkboxInput(                                                                                 #Check Box for Zooplankton Stations
-          "zooplankton",
-          "Display Zooplankton Stations",
-          TRUE
-        ),
-        hr(),                                                                                          #Horizontal Line
         checkboxGroupInput(                                                                            #Check boxes for regions
           'region',
           'Select Regions',
@@ -191,13 +202,13 @@ ui <- fluidPage(
                      tabPanel('Map', 
                               fluidRow(leafletOutput('DeltaMap'), hr(), textOutput('Map_blurb'))),
                      tabPanel('Phenology of Risk', 
-                              fluidRow(textOutput('POR_blurb'), hr(), plotOutput("PORplot", width = "100%", height = "90vh"))),
+                              fluidRow(textOutput('POR_blurb'), hr(), plotOutput("PORplot", width = "1000px", height = "90vh"))),
                      tabPanel('1 Year Risk Predictions',
                               fluidRow(textOutput('SYP_blurb'), hr(), plotOutput("SingleYearPlot", width = "100%", height = "90vh"))),
                      tabPanel('10 Year Risk Predictions',
                               fluidRow(textOutput('TYP_blurb'), hr(), plotOutput("TenYearPlot", width = "100%", height = "90vh"))),
                      tabPanel('Map Meta Data', 
-                              fluidRow(dataTableOutput("Station_data")))
+                              fluidRow(textOutput('MetaData_blurb'), hr(), dataTableOutput("Station_data")))
           
         )
       )
@@ -221,6 +232,9 @@ server <- function(input, output, session) {
 ### Phenology of Risk ###
       #Input: TaxaInput (list), RegionInput (list)  
       #Ouptput: Phenology of Risk Plots in a grid
+  
+  
+  ###### MUST ADD IF CLAUSE TO ENSURE THAT THE PLOT WITH THE MOST REGIONS IS THE ONE WHOS LEGEND IS SHOWN!!!  #########
 make_phenologyOR_plots <- reactive ({
   req(input$region)
   req(input$species)
@@ -249,11 +263,12 @@ make_phenologyOR_plots <- reactive ({
       labs(subtitle = taxa)+
       theme_classic() +ylab("Critical Decline Risk (%)") +xlab("Month") +ylim(0,100)+
       scale_x_discrete(guide = guide_axis(angle = 50))+
-      scale_color_manual(values = COLORS) +   
-      theme(text = element_text(size = 15))
+      theme(text = element_text(size = 25))+
+      scale_color_manual(values = COLORS, name = ~Region)
     
-    if (i >= 3) {
+    if (i >= 1) {
       plot <- plot + theme(axis.title.x = element_blank(), axis.title.y = element_blank())
+      plot <- plot + guides(color = "none", shape = "none", size = "none") 
     }
     i <- i + 1
   
@@ -298,6 +313,8 @@ make_1year_risk_plot <- reactive ({
     taxa_spec_data <- FishZoopComparison_data %>% filter(Predator == SpeciesNamesSciNorm[taxa]) %>% filter(Timesteps == 1)  %>% filter(Region %in% regionSelected)
     taxa_spec_data$Region<-factor(taxa_spec_data$Region, levels = c("Delta", "Confluence" , "Suisun Bay", "San Pablo Bay"))
     taxa_spec_data$Taxa<-as.factor(taxa_spec_data$Taxa)
+    taxa_spec_data$Taxa<-relevel(taxa_spec_data$Taxa, taxa)
+    
     
     for (region in unique(taxa_spec_data$Region)) {
       taxa_region_spec_data <- taxa_spec_data %>% filter(Region == region)
@@ -314,10 +331,10 @@ make_1year_risk_plot <- reactive ({
         labs(title = paste0(SpeciesNamesSciNorm[taxa], ', ', region))+
         ylab("Critical Decline Risk (%)")+
         xlab("Fish and Potential Zoop. Prey")+
-        scale_color_manual(values = COLORS)+
-        scale_linetype_manual(values = LINES) +
-        theme(text = element_text(size = 25))+ 
-        theme(plot.title = element_text(size=25))+ 
+        scale_color_manual(values = COLORS, name = "Regions")+
+        scale_linetype_manual(values = LINES,  'Group') +
+        theme(text = element_text(size = 15))+ 
+        theme(plot.title = element_text(size=15))+ 
         geom_vline(xintercept = 1.5, linetype="dotted", color = "black", size=1.5)
       
       if (i >= 0 ) {
@@ -329,7 +346,7 @@ make_1year_risk_plot <- reactive ({
       plots[[paste0(SpeciesNamesSciNorm[taxa], ', ', region)]] <- plot
     }
   }
-  patchwork <- wrap_plots(plots, ncol = 3, guides = 'collect')+
+  patchwork <- wrap_plots(plots, ncol = 4, guides = 'collect')+
   plot_annotation(title = "1 Year Predicted Risk Plots", theme = theme(plot.title = element_text(size = 35)))&
   theme(legend.position = 'right')
   return (patchwork)
@@ -382,13 +399,13 @@ make_10year_prediction_plot <- reactive( {
         geom_line(aes(x=Timesteps, y=Meanprob, color=Region, linetype=Group), linewidth=2)+
         geom_ribbon(aes(x=Timesteps, ymin=Meanbest, ymax=Meanworst, fill=Region, group=(interaction(Group, Region))), alpha=0.05, size=2)+
         theme_classic() +ylim(0,100) + scale_x_continuous(breaks=seq(1,10,1))+
-        theme(text = element_text(size = 25))+
-        scale_color_manual(values = COLORS)+
+        theme(text = element_text(size = 20))+
+        scale_color_manual(values = COLORS, name = 'Region')+
         scale_fill_manual(values = COLORS)+
         ylab("Critical Decline Risk (%)") +
         xlab("Years From Present")+
-        scale_linetype_manual(values = LINES) + 
-        theme(plot.title = element_text(size = 25)) +
+        scale_linetype_manual(values = LINES, name = 'Group') + 
+        theme(plot.title = element_text(size = 15)) +
         labs(title = paste0(SpeciesNamesSciNorm[taxa], ', ', region))
       
              # Conditionally remove axis labels for all plots except one
@@ -401,7 +418,7 @@ make_10year_prediction_plot <- reactive( {
       plots[[paste0(SpeciesNamesSciNorm[taxa], ', ', region)]] <- plot
     }
   }
-  patchwork <- wrap_plots(plots, ncol = 3, guides = 'collect')+
+  patchwork <- wrap_plots(plots, ncol = 4, guides = 'collect')+
   plot_annotation(title = "10 Year Predicted Risk Plots", theme = theme(plot.title = element_text(size = 35)))&
   theme(legend.position = 'right')
   return (patchwork)
@@ -409,8 +426,7 @@ make_10year_prediction_plot <- reactive( {
 
   FetchStationSummaryData <- reactive({
     req(input$region)
-    req(input$fish)
-    req(input$zooplankton)
+
     filtered_data  <- StationSummaryData |> dplyr::filter(
       if ("Select All" %in% input$region) {
         Region %in% station_regions
@@ -423,15 +439,16 @@ make_10year_prediction_plot <- reactive( {
     if (input$fish && input$zooplankton) {                                                      #filtering based on fish and zoop inputs
       return (filtered_data)
     } else if (input$fish) {
-        filtered_data <- filtered_data %>% dplyr::filter(Group == 'Fish')
+        filtered_data <- filtered_data |> dplyr::filter(Group != 'Zooplankton')
     } else if (input$zooplankton) {
-      filtered_data <- filtered_data %>% dplyr::filter(Group == 'Zooplankton')
+      filtered_data <- filtered_data |> dplyr::filter(Group != 'Fish')
     } else {
-      filtered_data <- datatable()
+      filtered_data <- filtered_data |> dplyr::filter(Group =='Mean')
     }
     return (filtered_data)
   })
   
+
   
   
   
