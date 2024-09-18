@@ -121,15 +121,14 @@ legend_spec_POR <- list(
 
 #Information on each plot
 
-POR_blurb <- "Monthly risk that an age-0 fish species would experience a 90% population decline for that month in each region. Points are scaled by percentage of mean annual catch. Critical windows–i.e., months that contain 80% of the mean annual catch–are in saturated tones while off-window months are desaturated. Gaps indicate that a species often had zero abundance for that month and region and were thus not modeled."
+POR_blurb <- "Monthly risk that an age-0 fish species would experience a 90% catch decline for that month in each region (hereafter, critical decline risk). Points are scaled to represent monthly percentage of annual catch (based on long-term averages). Months that collectively contain 80% of the mean annual catch are in saturated tones, while off-window months are desaturated. Gaps indicate that a species often had zero abundance for that month and region thus risk for that month was not assessed."
 
-SingleYearPredicitons_blurb <- "Mean critical decline risk of fish predators during their high-abundance windows paired  with the potential suite of zooplankton prey within that same window. Points represent probabilities calculated from maximum likelihood parameter estimates. Lower bound represents “best case scenario” wherein decline risks are calculated with the most positive population trend and lowest amount of process error variance. Upper bound represents “worst case scenario” calculated with the most negative population trend and highest amount of process error variance."
+SingleYearPredicitons_blurb <- "Mean critical decline risk of fish predators during their high-abundance windows, paired with critical decline risk for their potential suite of zooplankton prey within that same window. Points represent probabilities calculated from maximum likelihood parameter estimates. Lower risk bounds represent “best case scenarios”, calculated with the most positive population trend and the lowest process error variance possible (based on estimated uncertainty for these parameters). Conversely, upper risk bounds represent “worst case scenarios” calculated with the most negative population trend and highest  process error variance."
 
-TenYearPredictions_blurb <- "Critical decline risk projected out 10 years from present for fish predators (solid line) in their high population window and the mean risk of their zooplankton prey assemblage (dashed line) during that same window. Bands represent the range between best case and worst case scenarios. Asterisks represent significant differences between fishes and zooplankton."
+TenYearPredictions_blurb <- "Critical decline risk projected out 10 years from present for fish predators (solid line) in their high-abundance window, and mean risk of their zooplankton prey assemblage (dashed line) during that same window. Bands represent the range between best case and worst case scenarios. Lower risk bounds represent “best case scenarios”, calculated with the most positive population trend and the lowest process error variance (based on estimated uncertainty for these parameters). Conversely, upper risk bounds represent “worst case scenario”, calculated with the most negative population trend and highest process error variance. Asterisks denote significant differences in mean critical decline risk between fishes and zooplankton."
 
-MetaData_Blurb <- "This Station Data table has stations as a unique row, and the following columns are associated metadata. The search bar on the top right allows for ease of search for species or stations. 
-
-The metadata is as follows: (Taxa: species surveyed up at each station), (Region: Based on the Commonly divided regions of the Delta System), (Start.Collection.Year: First year each taxa was identified. In order of taxa appearance), (End.Collection.Year: Most Recent year each taxa was identified. In order of taxa appearance), (Mean.CPUE: Mean Catch Per Unit Effort), (Occurances: Number of Non-Zero encounters)
+StationData_Blurb <- "Metadata summarizing the datasets included in our modeling exercise. The table summarizes information available for each station (each shown as a unique row). The search bar on the top right allows for filtering  species (Taxa) or stations (Station). 
+The fields are: Group (Fish or Zooplankton), Taxa (species surveyed up at each station), Region (South Bay, Central Bay, San Pablo Bay, Suisun Bay, Confluence, Delta), Start.Collection.Year (first year each taxa was collected, in order of taxa appearance), End.Collection.Year (most recent year each taxa was collected, in order of taxa appearance), Total.Years.of.Collection (Number of years collection occurred, in order of taxa appearance), Mean.CPUE (Mean Catch Per Unit Effort), Occurrences (number of non-zero records).
 "
 
 Map_blurb <- "Locations of the stations used in our models. Collection locations for fish data are represented in black circles, and data were generated by the California Department of Fish and Wildlife Bay Study. Collection locations for zooplankton are represented in maroon circles, and data were generated by the Interagency Ecological Program’s Environmental Monitoring Program. Hovering over data points reveals the station number and assigned region."
@@ -225,7 +224,7 @@ ui <- fluidPage(
                      tabPanel('10 Year Risk Predictions',
                               fluidRow(div(textOutput('TYP_blurb'), class = 'custom-text'), hr(), plotOutput("TenYearPlot", width = "100%", height = "90vh"))),
                      tabPanel('Station Data', 
-                              fluidRow(div(textOutput('MetaData_blurb'), class = 'custom-text'), hr(), DTOutput("Station_data"))),
+                              fluidRow(div(textOutput('StationData_blurb'), class = 'custom-text'), hr(), DTOutput("Station_data"))),
                      tabPanel('Additional Information',
                               fluidRow(div(textOutput('LinktoDataBlurb'), class = 'custom-text-bold'), 
                                        hr(),
@@ -592,7 +591,7 @@ make_10year_prediction_plot <- reactive( {
       
       ### Station Meta Data and blurb ###
       output$Station_data <- renderDT({FetchStationSummaryData()})                             #Dynamic Table for Metadata
-      output$MetaData_blurb <- renderText(MetaData_Blurb)
+      output$StationData_blurb <- renderText(StationData_Blurb)
       
       
       ### Additional Information blurbs + links ###
