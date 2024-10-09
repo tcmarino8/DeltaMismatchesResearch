@@ -1,0 +1,883 @@
+---
+title: "Mismatches_mesozooplankton_loess"
+author: "Denise Colombano"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+Calculate phenology metrics for each species x station x year combination
+Calculate cumulative sum, then estimate the day of each metric:
+- Day when 15% of catch occurred (beginning peak)
+- Day when 50% of catch occurred (peak timing)
+- Day when 85% of catch occurred (end peak)
+- Number of days between 15% and 85% catch (duration of peak)
+
+# load libraries
+```{r}
+library(tidyverse)
+library(patchwork)
+
+# install packages from GitHub
+library(devtools)
+devtools::install_github("InteragencyEcologicalProgram/zooper") # has been updated as of Feb 14 2023
+devtools::install_github("Delta-Stewardship-Council/deltafish", ref="v1.0.0") # has been updated as of July 30 2024
+
+library(zooper)
+library(deltafish)
+```
+
+
+# zoop data
+```{r}
+# Query EMP data: https://iep.ca.gov/Science-Synthesis-Service/Monitoring-Programs/EMP
+MyZoops <- Zoopsynther(Data_type = "Community", 
+                       Sources = "EMP")
+View(MyZoops)
+
+MyZoopsMap <- MyZoops %>% 
+  # 6 core stations sampled consistently
+  filter(Station== "NZ028" | Station== "NZ048"| Station== "NZ054" | Station== "NZ060"|
+           Station=="NZ064" | Station == "NZD41") %>% 
+  distinct(Station, Latitude, Longitude) %>% 
+  mutate(Survey="EMP Zooplankton")
+
+# Query sampling dates where they pulled nets
+MyZoopsS <- MyZoops %>% 
+  # 6 core stations sampled consistently
+  filter(Station== "NZ028" | Station== "NZ048"| Station== "NZ054" | Station== "NZ060"|
+           Station=="NZ064" | Station == "NZD41") %>% 
+  filter(Year > 1994) %>% 
+  distinct(Date, Station, SizeClass) %>% 
+  mutate(Sampled=1)
+View(MyZoopsS)
+
+MesoSampling <- MyZoopsS %>% 
+  filter(SizeClass=="Meso")
+MacroSampling <- MyZoopsS %>% 
+  filter(SizeClass=="Macro")
+
+# how many sampling months and stations combinations are there supposed to be? 1872
+# so over a 25+ year period, there are about 22-25 missed sampling month x station combos
+samplingdf <- expand.grid(Station=c("NZD41", "NZ028", "NZ048", "NZ054", "NZ060", "NZ064"),
+                     Month=seq(1,12,1),
+                     Year=seq(1995,2020,1))
+
+# Filter out taxa of interest
+# Note: These df have zero catches where nets were pulled but species was absent
+# However there are instances where no sampling occurred
+MyZoopsT6 <- MyZoops %>% 
+  filter(
+    Order == "Calanoida" |
+      Order == "Cyclopoida" | 
+      Order == "Cladocera" | 
+      Order == "Mysida" 
+  )  %>% 
+  filter(Year > 1994) %>% 
+  mutate(Year=lubridate::year(Date), Julian=lubridate::yday(Date), Month=lubridate::month(Date)) %>%
+  # 6 core stations sampled consistently
+  filter(Station== "NZ028" | Station== "NZ048"| Station== "NZ054" | Station== "NZ060"|
+           Station=="NZ064" | Station == "NZD41")
+head(MyZoopsT6)
+dim(MyZoopsT6)
+
+MyZoopsT6$Station <- factor(MyZoopsT6$Station, levels=c("NZD41", "NZ028", "NZ048", "NZ054", "NZ060", "NZ064"))
+
+# Filter out size classes
+# Meso = Mesozooplankton
+MyZoopsMeso6 <- MyZoopsT6 %>% 
+  filter(SizeClass == "Meso")
+MyZoopsMeso6$Date <- lubridate::ymd(MyZoopsMeso6$Date)
+
+# Macro = Macrozooplankton
+MyZoopsMacro6 <- MyZoopsT6 %>% 
+  filter(SizeClass == "Macro")
+MyZoopsMacro6$Date <- lubridate::ymd(MyZoopsMacro6$Date)
+```
+
+# mesozooplankton adults
+```{r}
+# Adult mesozoops
+MyZoopsMeso6_Spp <- MyZoopsMeso6 %>% 
+  filter(Species == "Eurytemora affinis" |
+          Species == "Pseudodiaptomus forbesi" |
+           Species=="Sinocalanus doerrii" |
+           Species=="Limnoithona tetraspina" |
+           Species=="Bosmina longirostris") %>%
+  filter(Lifestage=="Adult") %>% 
+  # log(x + 1)
+  mutate(CPUE1= CPUE + 1) %>% 
+  mutate(CPUE_log=log(CPUE1))
+View(MyZoopsMeso6_Spp)
+summary(MyZoopsMeso6_Spp)
+
+meso_df <- MyZoopsMeso6_Spp
+```
+
+## loess smoother
+```{r}
+Meso_loess <- MyZoopsMeso6_Spp %>%
+  select(Species, Station, Date, Month, Year, Julian, CPUE, CPUE_log) %>% 
+  arrange(Station, Year, Julian)
+unique(Meso_loess$Species)
+
+
+# create a template of ordinal days across the entire time series 1995-present, for each station
+# see URL: https://stackoverflow.com/questions/53619583/new-column-in-r-which-is-cumulative-counting-adding-up-unique-dates
+ordinaldf <- expand.grid(Station=c("NZD41", "NZ028", "NZ048", "NZ054", "NZ060", "NZ064"),
+                         Date= seq(as.Date("1995-01-01"), as.Date("2021-12-31"), 1)) %>% 
+  arrange(Station, Date) %>% 
+  group_by(Station) %>% 
+  mutate(Ordinal=cumsum(c(TRUE, diff(Date) != 0)))
+View(ordinaldf)
+
+ordinaldf_pred <- ordinaldf %>% 
+  select(-Date)
+
+# filter for loess model
+Meso_loess2 <- Meso_loess %>%
+  group_by(Species) %>%
+  left_join(ordinaldf, by=c("Station", "Date"))
+
+head(Meso_loess2)
+
+
+################################ Nested for loop code by Mike Beakes July 2022
+
+head(Meso_loess2)
+
+Span.list <- data.frame(Span = c(0.02, 0.025, 0.03))
+
+ordinaldf_pred2 <- data.frame(Ordinal = unique(ordinaldf_pred$Ordinal))
+
+dat.pred <- data.frame(Species = NA, Station = NA, Span = NA, predicted = NA, Ordinal = NA)
+
+for(i in unique(Meso_loess2$Species)){
+  temp.dat <- subset(Meso_loess2, Species == i)
+  for(j in unique(temp.dat$Station)){
+    temp.dat2 <- subset(temp.dat, Station == j)
+    temp.dat2 <- temp.dat2[order(temp.dat2$Ordinal), ]
+    for(k in unique(Span.list$Span)){
+      fit.ls <- loess(CPUE_log ~ Ordinal, span = k, model=TRUE,
+                       control = loess.control(surface="direct", statistics="exact"), 
+                       degree=2, normalize=FALSE, data=temp.dat2)
+      #browser()
+    pred.ls <- data.frame(Species = i, Station = j, Span = k, predicted = predict(fit.ls, newdata=ordinaldf_pred2), 
+                          Ordinal = ordinaldf_pred2)
+    dat.pred <- rbind(dat.pred, pred.ls)
+    }
+  }
+}
+
+#dat.pred <- dat.pred[-1,]
+
+head(dat.pred)
+tail(dat.pred)
+
+str(dat.pred)
+unique(dat.pred$Species)
+View(dat.pred)
+
+###################################
+
+# remove the weird NA at the top of the df
+dat.pred2 <- dat.pred %>% 
+  filter(!is.na(Species))
+dim(dat.pred2) # 887580 rows
+
+meso_spp <- unique(meso_df$Species)
+meso_spp
+```
+
+
+
+## species-specific windows
+Create a template of our new "species windows"
+Species windows are a 12 month period centered on the month of peak abundance instead of calendar months 1-12
+```{r}
+# calculate midpoints of each month
+ordinaldf_spp <- expand.grid(Station=c("NZD41", "NZ028", "NZ048", "NZ054", "NZ060", "NZ064"),
+                             Date= seq(as.Date("1995-01-01"), as.Date("2021-12-31"), 1)) %>%
+  arrange(Station, Date) %>% 
+  group_by(Station) %>% 
+  mutate(Ordinal=cumsum(c(TRUE, diff(Date) != 0)), Julian= lubridate::yday(Date), 
+         Year=lubridate::year(Date), Month=lubridate::month(Date)) %>% 
+  ungroup()
+View(ordinaldf_spp) # 59172 rows
+
+# Identify the median Julian day of each month
+ordinaldf_months <- ordinaldf_spp %>% 
+  group_by(Month) %>% 
+  summarize(medianJulian=median(Julian))
+ordinaldf_months
+
+# create df with species and their peak months
+# so we can join all dfs together using Peak_month column
+meso_peaks_sppmo <- meso_df %>% 
+  ungroup() %>% 
+  distinct(Species) %>% 
+  mutate(Peak_month=case_when(
+    Species == "Bosmina longirostris" ~ "March",
+    Species == "Eurytemora affinis" ~ "March",
+    Species == "Limnoithona tetraspina" ~ "June",
+    Species == "Pseudodiaptomus forbesi" ~ "July",
+    Species == "Sinocalanus doerrii" ~ "June"
+  ))
+meso_peaks_sppmo
+```
+
+
+```{r}
+# For species whose midpoint is in June, median Julian day = 167;
+# usually the middle of the year falls on Julian day 185.5;
+# so the offset is ~15.5 days to center 167 as the middle of the
+# species-specific year. December 16 becomes Julian day 1. 
+# For May, November 16 becomes Julian day 1.
+# For July, January 16 becomes Julian day 1.
+# sorry there is a better way to do this.
+mar1 <- tibble(Julian3=seq(from=261, to=366, by=1))
+mar2 <- tibble(Julian3=seq(from=1, to=260, by=1))
+ordinaldf_mar <- bind_rows(mar1, mar2)
+
+apr1 <- tibble(Julian4=seq(from=291, to=366, by=1))
+apr2 <- tibble(Julian4=seq(from=1, to=290, by=1))
+ordinaldf_apr <- bind_rows(apr1, apr2)
+
+may1 <- tibble(Julian5=seq(from=321, to=366, by=1))
+may2 <- tibble(Julian5=seq(from=1, to=320, by=1))
+ordinaldf_may <- bind_rows(may1, may2)
+
+june1 <- tibble(Julian6=seq(from=351, to=366, by=1))
+june2 <- tibble(Julian6=seq(from=1, to=350, by=1))
+ordinaldf_june <- bind_rows(june1, june2)
+
+july1 <- tibble(Julian7=seq(from=16, to=366, by=1))
+july2 <- tibble(Julian7=seq(from=1, to=15, by=1))
+ordinaldf_july <- bind_rows(july1, july2)
+
+ordinaldf_spp2 <- bind_cols(ordinaldf_mar, ordinaldf_apr, ordinaldf_may, 
+                            ordinaldf_june, ordinaldf_july) %>%
+  mutate(Julian=1:366)
+View(ordinaldf_spp2)
+
+
+# left join back to regular df - new columns for species windows
+ordinaldf_spp3 <- ordinaldf_spp %>%
+  left_join(ordinaldf_spp2, by="Julian", multiple="all")
+summary(ordinaldf_spp3)
+
+
+# now do it again for ordinal day - This is placeholder value
+ordinaldf_spp4 <- ordinaldf_spp3 %>%
+  mutate(Ordinal3 = Ordinal + 15, # placeholder value
+         Ordinal4 = Ordinal + 15, # placeholder value
+         Ordinal5 = Ordinal + 15, # placeholder value
+          Ordinal6 = Ordinal + 15,
+         Ordinal7 = Ordinal + 45)
+View(ordinaldf_spp4)
+dim(ordinaldf_spp4)
+
+# how many years in time series? 27, but now there will be 28 "species years" because of being
+# split up in year 1 and year 28
+years <- ordinaldf_spp4 %>%
+  select(Year) %>%
+  unique()
+
+# which years are leap years?
+leaps <- ordinaldf_spp4 %>%
+  group_by(Year) %>%
+  summarize(max_day = max(Julian)) %>%
+  filter(max_day==366)
+  
+
+##################
+# now create species "years" - instead of calendar year
+
+# March
+ordinaldf_spp_mar <- ordinaldf_spp4 %>%
+  select(Date:Month, Julian3, Ordinal3) %>%
+  unique()
+View(ordinaldf_spp_mar)
+dim(ordinaldf_spp_mar)
+
+mar_yr1 <- tibble(Julian=seq(from=66, to=365, by=1), Year=1) 
+mar_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2) # 1996
+mar_yr3 <- tibble(Julian=seq(from=1, to=365, by=1), Year=3)
+mar_yr4 <- tibble(Julian=seq(from=1, to=365, by=1), Year=4)
+mar_yr5 <- tibble(Julian=seq(from=1, to=365, by=1), Year=5)
+mar_yr6 <- tibble(Julian=seq(from=1, to=366, by=1), Year=6) # 2000
+mar_yr7 <- tibble(Julian=seq(from=1, to=365, by=1), Year=7)
+mar_yr8 <- tibble(Julian=seq(from=1, to=365, by=1), Year=8)
+mar_yr9 <- tibble(Julian=seq(from=1, to=365, by=1), Year=9)
+mar_yr10 <- tibble(Julian=seq(from=1, to=366, by=1), Year=10) # 2004
+mar_yr11 <- tibble(Julian=seq(from=1, to=365, by=1), Year=11)
+mar_yr12 <- tibble(Julian=seq(from=1, to=365, by=1), Year=12)
+mar_yr13 <- tibble(Julian=seq(from=1, to=365, by=1), Year=13)
+mar_yr14 <- tibble(Julian=seq(from=1, to=366, by=1), Year=14) # 2008
+mar_yr15 <- tibble(Julian=seq(from=1, to=365, by=1), Year=15)
+mar_yr16 <- tibble(Julian=seq(from=1, to=365, by=1), Year=16)
+mar_yr17 <- tibble(Julian=seq(from=1, to=365, by=1), Year=17)
+mar_yr18 <- tibble(Julian=seq(from=1, to=366, by=1), Year=18) # 2012
+mar_yr19 <- tibble(Julian=seq(from=1, to=365, by=1), Year=19)
+mar_yr20 <- tibble(Julian=seq(from=1, to=365, by=1), Year=20)
+mar_yr21 <- tibble(Julian=seq(from=1, to=365, by=1), Year=21)
+mar_yr22 <- tibble(Julian=seq(from=1, to=366, by=1), Year=22) # 2016
+mar_yr23 <- tibble(Julian=seq(from=1, to=365, by=1), Year=23)
+mar_yr24 <- tibble(Julian=seq(from=1, to=365, by=1), Year=24)
+mar_yr25 <- tibble(Julian=seq(from=1, to=365, by=1), Year=25)
+mar_yr26 <- tibble(Julian=seq(from=1, to=366, by=1), Year=26) # 2020
+mar_yr27 <- tibble(Julian=seq(from=1, to=365, by=1), Year=27)
+mar_yr28 <- tibble(Julian=seq(from=1, to=65, by=1), Year=28)
+
+mar_years <- bind_rows(mar_yr1, mar_yr2, mar_yr3,mar_yr4,mar_yr5,mar_yr6,
+                        mar_yr7,mar_yr8,mar_yr9,mar_yr10,mar_yr11,mar_yr12,
+                        mar_yr13,mar_yr14,mar_yr15,mar_yr16,mar_yr17,mar_yr18,
+                        mar_yr19,mar_yr20,mar_yr21,mar_yr22,mar_yr23,mar_yr24,
+                        mar_yr25,mar_yr26,mar_yr27, mar_yr28) %>%
+  mutate(Peak_month="March") %>%
+  rename(Species_year=Year, Julian_year=Julian)
+dim(mar_years) # 9862!
+
+# prepare df for march peak species
+ordinaldf_spp_mar2 <- bind_cols(ordinaldf_spp_mar, mar_years) %>%
+  select(Date:Month, Species_year, Julian_year, Peak_month)
+
+
+# April
+ordinaldf_spp_apr <- ordinaldf_spp4 %>%
+  select(Date:Month, Julian4, Ordinal4) %>%
+  unique()
+View(ordinaldf_spp_apr)
+dim(ordinaldf_spp_apr)
+
+apr_yr1 <- tibble(Julian=seq(from=36, to=365, by=1), Year=1) 
+apr_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2) # 1996
+apr_yr3 <- tibble(Julian=seq(from=1, to=365, by=1), Year=3)
+apr_yr4 <- tibble(Julian=seq(from=1, to=365, by=1), Year=4)
+apr_yr5 <- tibble(Julian=seq(from=1, to=365, by=1), Year=5)
+apr_yr6 <- tibble(Julian=seq(from=1, to=366, by=1), Year=6) # 2000
+apr_yr7 <- tibble(Julian=seq(from=1, to=365, by=1), Year=7)
+apr_yr8 <- tibble(Julian=seq(from=1, to=365, by=1), Year=8)
+apr_yr9 <- tibble(Julian=seq(from=1, to=365, by=1), Year=9)
+apr_yr10 <- tibble(Julian=seq(from=1, to=366, by=1), Year=10) # 2004
+apr_yr11 <- tibble(Julian=seq(from=1, to=365, by=1), Year=11)
+apr_yr12 <- tibble(Julian=seq(from=1, to=365, by=1), Year=12)
+apr_yr13 <- tibble(Julian=seq(from=1, to=365, by=1), Year=13)
+apr_yr14 <- tibble(Julian=seq(from=1, to=366, by=1), Year=14) # 2008
+apr_yr15 <- tibble(Julian=seq(from=1, to=365, by=1), Year=15)
+apr_yr16 <- tibble(Julian=seq(from=1, to=365, by=1), Year=16)
+apr_yr17 <- tibble(Julian=seq(from=1, to=365, by=1), Year=17)
+apr_yr18 <- tibble(Julian=seq(from=1, to=366, by=1), Year=18) # 2012
+apr_yr19 <- tibble(Julian=seq(from=1, to=365, by=1), Year=19)
+apr_yr20 <- tibble(Julian=seq(from=1, to=365, by=1), Year=20)
+apr_yr21 <- tibble(Julian=seq(from=1, to=365, by=1), Year=21)
+apr_yr22 <- tibble(Julian=seq(from=1, to=366, by=1), Year=22) # 2016
+apr_yr23 <- tibble(Julian=seq(from=1, to=365, by=1), Year=23)
+apr_yr24 <- tibble(Julian=seq(from=1, to=365, by=1), Year=24)
+apr_yr25 <- tibble(Julian=seq(from=1, to=365, by=1), Year=25)
+apr_yr26 <- tibble(Julian=seq(from=1, to=366, by=1), Year=26) # 2020
+apr_yr27 <- tibble(Julian=seq(from=1, to=365, by=1), Year=27)
+apr_yr28 <- tibble(Julian=seq(from=1, to=35, by=1), Year=28)
+
+apr_years <- bind_rows(apr_yr1, apr_yr2, apr_yr3,apr_yr4,apr_yr5,apr_yr6,
+                        apr_yr7,apr_yr8,apr_yr9,apr_yr10,apr_yr11,apr_yr12,
+                        apr_yr13,apr_yr14,apr_yr15,apr_yr16,apr_yr17,apr_yr18,
+                        apr_yr19,apr_yr20,apr_yr21,apr_yr22,apr_yr23,apr_yr24,
+                        apr_yr25,apr_yr26,apr_yr27, apr_yr28) %>%
+  mutate(Peak_month="April") %>%
+  rename(Species_year=Year, Julian_year=Julian)
+dim(apr_years) # 9862!
+
+# prepare df for april peak species
+ordinaldf_spp_apr2 <- bind_cols(ordinaldf_spp_apr, apr_years) %>%
+  select(Date:Month, Species_year, Julian_year, Peak_month)
+
+
+# May
+ordinaldf_spp_may <- ordinaldf_spp4 %>%
+  select(Date:Month, Julian5, Ordinal5) %>%
+  unique()
+View(ordinaldf_spp_may)
+dim(ordinaldf_spp_may)
+
+may_yr1 <- tibble(Julian=seq(from=16, to=365, by=1), Year=1) 
+may_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2) # 1996
+may_yr3 <- tibble(Julian=seq(from=1, to=365, by=1), Year=3)
+may_yr4 <- tibble(Julian=seq(from=1, to=365, by=1), Year=4)
+may_yr5 <- tibble(Julian=seq(from=1, to=365, by=1), Year=5)
+may_yr6 <- tibble(Julian=seq(from=1, to=366, by=1), Year=6) # 2000
+may_yr7 <- tibble(Julian=seq(from=1, to=365, by=1), Year=7)
+may_yr8 <- tibble(Julian=seq(from=1, to=365, by=1), Year=8)
+may_yr9 <- tibble(Julian=seq(from=1, to=365, by=1), Year=9)
+may_yr10 <- tibble(Julian=seq(from=1, to=366, by=1), Year=10) # 2004
+may_yr11 <- tibble(Julian=seq(from=1, to=365, by=1), Year=11)
+may_yr12 <- tibble(Julian=seq(from=1, to=365, by=1), Year=12)
+may_yr13 <- tibble(Julian=seq(from=1, to=365, by=1), Year=13)
+may_yr14 <- tibble(Julian=seq(from=1, to=366, by=1), Year=14) # 2008
+may_yr15 <- tibble(Julian=seq(from=1, to=365, by=1), Year=15)
+may_yr16 <- tibble(Julian=seq(from=1, to=365, by=1), Year=16)
+may_yr17 <- tibble(Julian=seq(from=1, to=365, by=1), Year=17)
+may_yr18 <- tibble(Julian=seq(from=1, to=366, by=1), Year=18) # 2012
+may_yr19 <- tibble(Julian=seq(from=1, to=365, by=1), Year=19)
+may_yr20 <- tibble(Julian=seq(from=1, to=365, by=1), Year=20)
+may_yr21 <- tibble(Julian=seq(from=1, to=365, by=1), Year=21)
+may_yr22 <- tibble(Julian=seq(from=1, to=366, by=1), Year=22) # 2016
+may_yr23 <- tibble(Julian=seq(from=1, to=365, by=1), Year=23)
+may_yr24 <- tibble(Julian=seq(from=1, to=365, by=1), Year=24)
+may_yr25 <- tibble(Julian=seq(from=1, to=365, by=1), Year=25)
+may_yr26 <- tibble(Julian=seq(from=1, to=366, by=1), Year=26) # 2020
+may_yr27 <- tibble(Julian=seq(from=1, to=365, by=1), Year=27)
+may_yr28 <- tibble(Julian=seq(from=1, to=15, by=1), Year=28)
+
+may_years <- bind_rows(may_yr1, may_yr2, may_yr3,may_yr4,may_yr5,may_yr6,
+                        may_yr7,may_yr8,may_yr9,may_yr10,may_yr11,may_yr12,
+                        may_yr13,may_yr14,may_yr15,may_yr16,may_yr17,may_yr18,
+                        may_yr19,may_yr20,may_yr21,may_yr22,may_yr23,may_yr24,
+                        may_yr25,may_yr26,may_yr27, may_yr28) %>%
+  mutate(Peak_month="May") %>%
+  rename(Species_year=Year, Julian_year=Julian)
+dim(may_years) # 9862!
+
+# prepare df for may peak species
+ordinaldf_spp_may2 <- bind_cols(ordinaldf_spp_may, may_years) %>%
+  select(Date:Month, Species_year,Julian_year,  Peak_month)
+
+
+# June
+ordinaldf_spp_june <- ordinaldf_spp4 %>%
+  select(Date:Month, Julian6, Ordinal6) %>%
+  unique()
+View(ordinaldf_spp_june)
+dim(ordinaldf_spp_june)
+
+june_yr1 <- tibble(Julian=seq(from=351, to=365, by=1), Year=1) 
+june_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2) # 1996
+june_yr3 <- tibble(Julian=seq(from=1, to=365, by=1), Year=3)
+june_yr4 <- tibble(Julian=seq(from=1, to=365, by=1), Year=4)
+june_yr5 <- tibble(Julian=seq(from=1, to=365, by=1), Year=5)
+june_yr6 <- tibble(Julian=seq(from=1, to=366, by=1), Year=6) # 2000
+june_yr7 <- tibble(Julian=seq(from=1, to=365, by=1), Year=7)
+june_yr8 <- tibble(Julian=seq(from=1, to=365, by=1), Year=8)
+june_yr9 <- tibble(Julian=seq(from=1, to=365, by=1), Year=9)
+june_yr10 <- tibble(Julian=seq(from=1, to=366, by=1), Year=10) # 2004
+june_yr11 <- tibble(Julian=seq(from=1, to=365, by=1), Year=11)
+june_yr12 <- tibble(Julian=seq(from=1, to=365, by=1), Year=12)
+june_yr13 <- tibble(Julian=seq(from=1, to=365, by=1), Year=13)
+june_yr14 <- tibble(Julian=seq(from=1, to=366, by=1), Year=14) # 2008
+june_yr15 <- tibble(Julian=seq(from=1, to=365, by=1), Year=15)
+june_yr16 <- tibble(Julian=seq(from=1, to=365, by=1), Year=16)
+june_yr17 <- tibble(Julian=seq(from=1, to=365, by=1), Year=17)
+june_yr18 <- tibble(Julian=seq(from=1, to=366, by=1), Year=18) # 2012
+june_yr19 <- tibble(Julian=seq(from=1, to=365, by=1), Year=19)
+june_yr20 <- tibble(Julian=seq(from=1, to=365, by=1), Year=20)
+june_yr21 <- tibble(Julian=seq(from=1, to=365, by=1), Year=21)
+june_yr22 <- tibble(Julian=seq(from=1, to=366, by=1), Year=22) # 2016
+june_yr23 <- tibble(Julian=seq(from=1, to=365, by=1), Year=23)
+june_yr24 <- tibble(Julian=seq(from=1, to=365, by=1), Year=24)
+june_yr25 <- tibble(Julian=seq(from=1, to=365, by=1), Year=25)
+june_yr26 <- tibble(Julian=seq(from=1, to=366, by=1), Year=26) # 2020
+june_yr27 <- tibble(Julian=seq(from=1, to=365, by=1), Year=27)
+june_yr28 <- tibble(Julian=seq(from=1, to=350, by=1), Year=28)
+
+june_years <- bind_rows(june_yr1, june_yr2, june_yr3,june_yr4,june_yr5,june_yr6,
+                        june_yr7,june_yr8,june_yr9,june_yr10,june_yr11,june_yr12,
+                        june_yr13,june_yr14,june_yr15,june_yr16,june_yr17,june_yr18,
+                        june_yr19,june_yr20,june_yr21,june_yr22,june_yr23,june_yr24,
+                        june_yr25,june_yr26,june_yr27, june_yr28) %>%
+  mutate(Peak_month="June") %>%
+  rename(Species_year=Year, Julian_year=Julian)
+dim(june_years) # 9862!
+
+# prepare df for june peak species
+ordinaldf_spp_june2 <- bind_cols(ordinaldf_spp_june, june_years) %>%
+  select(Date:Month, Species_year,Julian_year,  Peak_month)
+
+
+# july
+ordinaldf_spp_july <- ordinaldf_spp4 %>%
+  select(Date:Month, Julian7, Ordinal7) %>%
+  unique()
+dim(ordinaldf_spp_july)
+View(ordinaldf_spp_july)
+
+july_yr1 <- tibble(Julian=seq(from=321, to=365, by=1), Year=1)
+july_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2)
+july_yr3 <- tibble(Julian=seq(from=1, to=365, by=1), Year=3)
+july_yr4 <- tibble(Julian=seq(from=1, to=365, by=1), Year=4)
+july_yr5 <- tibble(Julian=seq(from=1, to=365, by=1), Year=5)
+july_yr6 <- tibble(Julian=seq(from=1, to=366, by=1), Year=6)
+july_yr7 <- tibble(Julian=seq(from=1, to=365, by=1), Year=7)
+july_yr8 <- tibble(Julian=seq(from=1, to=365, by=1), Year=8)
+july_yr9 <- tibble(Julian=seq(from=1, to=365, by=1), Year=9)
+july_yr10 <- tibble(Julian=seq(from=1, to=366, by=1), Year=10)
+july_yr11 <- tibble(Julian=seq(from=1, to=365, by=1), Year=11)
+july_yr12 <- tibble(Julian=seq(from=1, to=365, by=1), Year=12)
+july_yr13 <- tibble(Julian=seq(from=1, to=365, by=1), Year=13)
+july_yr14 <- tibble(Julian=seq(from=1, to=366, by=1), Year=14)
+july_yr15 <- tibble(Julian=seq(from=1, to=365, by=1), Year=15)
+july_yr16 <- tibble(Julian=seq(from=1, to=365, by=1), Year=16)
+july_yr17 <- tibble(Julian=seq(from=1, to=365, by=1), Year=17)
+july_yr18 <- tibble(Julian=seq(from=1, to=366, by=1), Year=18)
+july_yr19 <- tibble(Julian=seq(from=1, to=365, by=1), Year=19)
+july_yr20 <- tibble(Julian=seq(from=1, to=365, by=1), Year=20)
+july_yr21 <- tibble(Julian=seq(from=1, to=365, by=1), Year=21)
+july_yr22 <- tibble(Julian=seq(from=1, to=366, by=1), Year=22)
+july_yr23 <- tibble(Julian=seq(from=1, to=365, by=1), Year=23)
+july_yr24 <- tibble(Julian=seq(from=1, to=365, by=1), Year=24)
+july_yr25 <- tibble(Julian=seq(from=1, to=365, by=1), Year=25)
+july_yr26 <- tibble(Julian=seq(from=1, to=366, by=1), Year=26)
+july_yr27 <- tibble(Julian=seq(from=1, to=365, by=1), Year=27)
+july_yr28 <- tibble(Julian=seq(from=1, to=320, by=1), Year=28)
+
+july_years <- bind_rows(july_yr1, july_yr2, july_yr3,july_yr4,july_yr5,july_yr6,
+                        july_yr7,july_yr8,july_yr9,july_yr10,july_yr11,july_yr12,
+                        july_yr13,july_yr14,july_yr15,july_yr16,july_yr17,july_yr18,
+                        july_yr19,july_yr20,july_yr21,july_yr22,july_yr23,july_yr24,
+                        july_yr25,july_yr26,july_yr27, july_yr28)%>%
+  mutate(Peak_month="July")%>%
+  rename(Species_year=Year, Julian_year=Julian)
+dim(july_years)
+
+# prepare df for july peak species
+ordinaldf_spp_july2 <- bind_cols(ordinaldf_spp_july, july_years) %>%
+  select(Date:Month, Species_year, Julian_year, Peak_month)
+
+
+# create the df: species-years
+ordinaldf_spp5 <- bind_rows(ordinaldf_spp_mar2, ordinaldf_spp_apr2, ordinaldf_spp_may2, ordinaldf_spp_june2, ordinaldf_spp_july2) %>%
+  full_join(meso_peaks_sppmo, by="Peak_month", multiple = "all") %>%
+  rename(Julian_year2=Julian_year)
+View(ordinaldf_spp5)
+
+# then repeat for every station and loess span
+Stations <- meso_df %>% ungroup() %>% distinct(Station) # 6 stations
+Stations
+
+meso_spp
+
+Species_year_stn_span <- expand.grid(Species = c("Bosmina longirostris",
+                                                   "Eurytemora affinis",
+                                                   "Limnoithona tetraspina",
+                                                   "Pseudodiaptomus forbesi",
+                                                   "Sinocalanus doerrii"),
+                                     Station=c("NZ048", "NZ054", "NZ028", "NZ060", "NZ064", "NZD41"),
+                                     Span = c(0.02, 0.025, 0.03))
+
+Species_year <- c(1:28)
+Species_year2 <- c(1995:2022)
+Species_year <- tibble(Species_year, Species_year2)
+
+ordinaldf_spp6 <- ordinaldf_spp5 %>% 
+  full_join(Species_year_stn_span, multiple="all") %>% 
+  left_join(Species_year, by="Species_year") %>% 
+  select(Span, Station, Date, Month, Ordinal, Julian, Year, Julian_year2, Species_year2, Peak_month, Species) %>%   filter(!is.na(Span)) # remove NAs
+
+View(ordinaldf_spp6)
+dim(ordinaldf_spp6) # 887580 rows
+
+summary(ordinaldf_spp6)
+
+# we are not ready to join to the loess predictions, need to add metadata (date, ordinal day)
+# back to the data frame first before we can join
+```
+
+   Month medianJulian
+   <dbl>        <dbl>
+ 1     1           16
+ 2     2           46
+ 3     3           75
+ 4     4          106
+ 5     5          136
+ 6     6          167
+ 7     7          197
+ 8     8          228
+ 9     9          259
+10    10          289
+11    11          320
+12    12          350
+
+  Species                 Peak_month
+  <chr>                   <chr>     
+1 Bosmina longirostris    March     
+2 Eurytemora affinis      March     
+3 Limnoithona tetraspina  June      
+4 Pseudodiaptomus forbesi July      
+5 Sinocalanus doerrii     June   
+
+## calculate cumsum
+```{r}
+# rename df
+Meso_loess_pred <- dat.pred2 %>% 
+  # filter out stations where species=present
+  # join to species peak months
+  left_join(ordinaldf_spp6) %>% 
+  # undo log(x+1)
+  rename(CPUE_pred=predicted) %>%
+  mutate(CPUE_pred= exp(CPUE_pred)) %>% 
+  mutate(CPUE_pred= CPUE_pred - 1) %>%
+  # if less than 0, make it 0, can't be negative
+  mutate(CPUE_pred0 = ifelse(CPUE_pred<0, 0, CPUE_pred)) %>% 
+  # query out Inf
+  filter(CPUE_pred0 != "Inf") %>% 
+  # calculate total sum for cumsum/ quantiles
+  group_by(Species_year2, Station, Species, Span) %>% 
+  mutate(CPUE_tot = sum(CPUE_pred0)) %>% 
+  ungroup() %>% 
+  # filter year x station combo where Meso are present
+  filter(!is.na(Date))  
+summary(Meso_loess_pred) #886585 rows
+
+View(Meso_loess_pred)
+summary(Meso_loess_pred)
+
+# Meso_loess_pred$Species <- as_factor(Meso_loess_pred$Species)
+# Meso_loess_pred$Station <- as_factor(Meso_loess_pred$Station)
+# Meso_loess_pred$Species_year <- as_factor(Meso_loess_pred$Species_year)
+
+# calculate cumsum and divide by max cumsum, multiply by 100 for percent
+Meso_pred <- Meso_loess_pred %>% 
+  # only calculate for year x station where Meso were present
+  filter(CPUE_tot > 0) %>% 
+  dplyr::group_by(Species, Species_year2, Station, Span) %>%
+  mutate(CPUE_predsum = cumsum(CPUE_pred0),
+         CPUE_predper = CPUE_predsum/ max(CPUE_predsum, na.rm=T)*100, 
+         CPUE_predper2= round(CPUE_predper, digits=0)) %>% 
+  ungroup()
+summary(Meso_pred)
+View(Meso_pred)
+
+# Based on cumsum %total catch, break down into ~15%, 50%, 85% quantile ranges
+# and extract the dates where those %catches occurred each year
+Meso_pred_quantiles <- Meso_pred %>%
+  mutate(Quantile= case_when(
+    CPUE_predper2 >= 13 & CPUE_predper2 <= 16 ~ "Lower",
+    CPUE_predper2 >= 48 & CPUE_predper2 <= 51 ~ "Median",
+    CPUE_predper2 >= 83 & CPUE_predper2 <= 86 ~ "Upper"
+  )) %>% 
+  filter(!is.na(Quantile)) %>% 
+  # find the minimum value for Julian/ Julian_year (specific to species windows)
+  dplyr::group_by(Span, Species, Species_year2, Station, Quantile) %>% 
+  dplyr::summarize(Julian_year2=min(Julian_year2, na.rm = TRUE)) %>%
+  mutate(Julian_year2 = round(Julian_year2, digits=0)) %>%
+  ungroup()
+summary(Meso_pred_quantiles)  # 6148 rows
+
+
+Meso_pred_quantiles_join <- Meso_pred_quantiles %>% 
+  # join it to metadata
+  left_join(ordinaldf_spp6) %>% 
+  # join it back to get CPUE values
+  left_join(Meso_pred)
+View(Meso_pred_quantiles_join)
+summary(Meso_pred_quantiles_join) # also 6148 rows
+```
+
+Plot to ground truth
+```{r}
+# Filter out loess span = 0.025 and 1995-2017
+Meso_loess_pred3 <- Meso_loess_pred %>%
+  filter(Date<"2017-12-31") %>% 
+  filter(Date>"1995-12-31") %>% 
+  filter(Span == 0.025) %>% 
+  mutate(Species_year3 = case_when(
+    Julian_year2 == 1 ~ Date
+  ))
+summary(Meso_loess_pred3) # 240988 rows (daily values)
+
+Meso_pred_quantiles1 <- Meso_pred_quantiles_join %>%
+  filter(Date<"2017-12-31") %>% 
+  filter(Date>"1995-12-31") %>% 
+  filter(Span == 0.025)
+summary(Meso_pred_quantiles1) # 1663 rows (quantiles = days of ~15, 50, 85% catch)
+
+
+#### Examples
+meso_spp
+
+
+## Species pilots
+# Eury example
+Meso_loess_pred_Eury <- Meso_loess_pred3 %>%
+  filter(Species=="Eurytemora affinis") 
+Meso_pred_quantiles_Eury <- Meso_pred_quantiles1 %>%
+    filter(Species=="Eurytemora affinis") 
+
+ggplot(Meso_loess_pred_Eury, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Eury, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Eurytemora affinis", subtitle="Loess, span=0.025, degree=2")
+
+
+# Pseudo example
+Meso_loess_pred_Pseudo <- Meso_loess_pred3 %>%
+  filter(Species=="Pseudodiaptomus forbesi") %>% 
+  filter(Station != "NZD41")
+Meso_pred_quantiles_Pseudo <- Meso_pred_quantiles1 %>%
+    filter(Species=="Pseudodiaptomus forbesi")  %>% 
+  filter(Station != "NZD41")
+
+meso_spp
+
+ggplot(Meso_loess_pred_Pseudo, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Pseudo, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Pseudodiaptomus forbesi", subtitle="Loess, span=0.025, degree=2")
+
+
+# Limno example
+Meso_loess_pred_Limno <- Meso_loess_pred3 %>%
+  filter(Species=="Limnoithona tetraspina") #%>% 
+  #filter(Station != "NZD41")
+Meso_pred_quantiles_Limno <- Meso_pred_quantiles1 %>%
+    filter(Species=="Limnoithona tetraspina")  #%>% 
+  #filter(Station != "NZD41")
+
+meso_spp
+
+ggplot(Meso_loess_pred_Limno, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Limno, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Limnoithona tetraspina", subtitle="Loess, span=0.025, degree=2")
+
+
+# Sino example
+Meso_loess_pred_Sino <- Meso_loess_pred3 %>%
+  filter(Species=="Sinocalanus doerrii") #%>% 
+  #filter(Station != "NZD41")
+Meso_pred_quantiles_Sino <- Meso_pred_quantiles1 %>%
+    filter(Species=="Sinocalanus doerrii")  #%>% 
+  #filter(Station != "NZD41")
+
+meso_spp
+
+ggplot(Meso_loess_pred_Sino, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Sino, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Sinocalanus doerrii", subtitle="Loess, span=0.025, degree=2")
+
+
+# Bosmina example
+Meso_loess_pred_Bos <- Meso_loess_pred3 %>%
+  filter(Species=="Bosmina longirostris") #%>% 
+  #filter(Station != "NZD41")
+Meso_pred_quantiles_Bos <- Meso_pred_quantiles1 %>%
+    filter(Species=="Bosmina longirostris")  #%>% 
+  #filter(Station != "NZD41")
+
+meso_spp
+
+ggplot(Meso_loess_pred_Bos, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Bos, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Bosmina longirostris", subtitle="Loess, span=0.025, degree=2")
+```
+
+
+# pick up here - calculate duration (# days) and add it as another row in "Quantile" column
+Fix the missing lower, median, and upper metrics. Currently ~50 missing each. Why?
+Also, when should the station NZD41 be included? Some zoops are very rare at that station.
+Create criteria for inclusion
+```{r}
+# ALL Species in one plot - Look at station NZD41
+Meso_loess25_quantiles <- Meso_pred_quantiles1 %>% 
+  ungroup() %>% 
+  select(Species, Year, Species_year2, Station, Date, Julian_year2, CPUE_pred0, Quantile)
+View(Meso_loess25_quantiles)
+
+ggplot(Meso_loess_pred3, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=0.75)+
+  geom_point(data=Meso_loess25_quantiles, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90, vjust=0.5))+
+  facet_grid(Species~Station, scales="free_y")+
+  labs(y="CPUE", title="Mesozooplankton", subtitle="Loess, span=0.025, degree=2")
+
+
+# calculate duration (number of days) between days where 15% and 85% catches occurred
+# duration of the peak
+Meso_duration <- Meso_loess_pred3 %>% 
+  left_join(Meso_loess25_quantiles) %>% 
+  filter(!is.na(Quantile)) %>% 
+  select(-Species_year3)
+
+Meso_duration25 <- Meso_duration %>% 
+  select(Species, Station, Date, Year, Species_year2, Julian_year2, Quantile) %>% 
+  pivot_wider(id_cols=c("Species", "Station", "Year", "Species_year2"), 
+              names_from=Quantile, values_from = Julian_year2)  %>% 
+  mutate(Duration= Upper - Lower) %>% 
+  filter(!is.na(Duration))
+View(Meso_duration25)
+summary(Meso_duration25) # 604 rows. 50 instances where there are NAs for Lower, Median, and Upper.
+# When we remove the 97 duration NAs it goes down to 507 rows. Need to fix this.
+
+# quick scatter plots to look at phenology metrics over time
+plot1 <- ggplot(Meso_duration25, aes(Year, Lower))+
+  geom_point(aes(color=Station))+
+  geom_smooth(method="lm", aes(color=Station), se=FALSE)+
+  theme_bw()+
+  facet_wrap(Species~., nrow=1, scales="free_y")+
+  scale_color_viridis_d()+
+  labs(title="Mesozooplankton (loess span = 0.025)", subtitle="Timing of 15% total catch", y="Julian day (spp)")
+plot1
+
+plot2 <- ggplot(Meso_duration25, aes(Year, Median))+
+  geom_point(aes(color=Station))+
+  geom_smooth(method="lm", aes(color=Station), se=FALSE)+
+  theme_bw()+
+  facet_wrap(Species~., nrow=1, scales="free_y")+
+  scale_color_viridis_d()+
+  labs(subtitle="Timing of 50% total catch", y="Julian day (spp)")
+plot2
+
+plot3 <- ggplot(Meso_duration25, aes(Year, Upper))+
+  geom_point(aes(color=Station))+
+  geom_smooth(method="lm", aes(color=Station), se=FALSE)+
+  theme_bw()+
+  facet_wrap(Species~., nrow=1, scales="free_y")+
+  scale_color_viridis_d()+
+  labs(subtitle="Timing of 85% total catch", y="Julian day (spp)")
+plot3
+
+plot4 <- ggplot(Meso_duration25, aes(Year, Duration))+
+  geom_point(aes(color=Station))+
+  geom_smooth(method="lm", aes(color=Station), se=FALSE)+
+  theme_bw()+
+  facet_wrap(Species~., nrow=1, scales="free_y")+
+  scale_color_viridis_d()+
+  labs(subtitle="Duration of peak catch", y="Number of days")
+plot4
+
+library(patchwork)
+plot1 + plot2 + plot3 + plot4 + plot_layout(nrow=4)
+```
+
+
+
