@@ -23,9 +23,9 @@ library(patchwork)
 library(devtools)
 devtools::install_github("InteragencyEcologicalProgram/zooper") # has been updated as of Feb 14 2023
 devtools::install_github("Delta-Stewardship-Council/deltafish", ref="v1.0.0") # has been updated as of July 30 2024
-
 library(zooper)
 library(deltafish)
+library(leaflet)
 ```
 
 
@@ -43,6 +43,8 @@ MyZoopsMap <- MyZoops %>%
   distinct(Station, Latitude, Longitude) %>% 
   mutate(Survey="EMP Zooplankton")
 
+leaflet::
+
 # Query sampling dates where they pulled nets
 MyZoopsS <- MyZoops %>% 
   # 6 core stations sampled consistently
@@ -53,6 +55,10 @@ MyZoopsS <- MyZoops %>%
   mutate(Sampled=1)
 View(MyZoopsS)
 
+unique(MyZoops$Source)
+unique(MyZoops$Year)
+
+######## MESO VS MICRO == SIZE CLASSIFICATION #######
 MesoSampling <- MyZoopsS %>% 
   filter(SizeClass=="Meso")
 MacroSampling <- MyZoopsS %>% 
@@ -113,6 +119,14 @@ View(MyZoopsMeso6_Spp)
 summary(MyZoopsMeso6_Spp)
 
 meso_df <- MyZoopsMeso6_Spp
+
+
+
+
+
+
+
+###### DATA IS CLEANED AND READY TO BE INTERPOLATED AT THIS POINT ######
 ```
 
 ## loess smoother
@@ -147,6 +161,7 @@ head(Meso_loess2)
 
 head(Meso_loess2)
 
+#### WHY SPAN ####
 Span.list <- data.frame(Span = c(0.02, 0.025, 0.03))
 
 ordinaldf_pred2 <- data.frame(Ordinal = unique(ordinaldf_pred$Ordinal))
@@ -188,6 +203,11 @@ dim(dat.pred2) # 887580 rows
 
 meso_spp <- unique(meso_df$Species)
 meso_spp
+
+
+##### LOESS DONE FOR EACH SPECIES, STATION AND ORDINAL DAY #####
+
+##### EASILY REPEATABLE #######
 ```
 
 
@@ -259,7 +279,7 @@ ordinaldf_july <- bind_rows(july1, july2)
 ordinaldf_spp2 <- bind_cols(ordinaldf_mar, ordinaldf_apr, ordinaldf_may, 
                             ordinaldf_june, ordinaldf_july) %>%
   mutate(Julian=1:366)
-View(ordinaldf_spp2)
+#View(ordinaldf_spp2)
 
 
 # left join back to regular df - new columns for species windows
@@ -275,7 +295,7 @@ ordinaldf_spp4 <- ordinaldf_spp3 %>%
          Ordinal5 = Ordinal + 15, # placeholder value
           Ordinal6 = Ordinal + 15,
          Ordinal7 = Ordinal + 45)
-View(ordinaldf_spp4)
+#View(ordinaldf_spp4)
 dim(ordinaldf_spp4)
 
 # how many years in time series? 27, but now there will be 28 "species years" because of being
@@ -298,7 +318,7 @@ leaps <- ordinaldf_spp4 %>%
 ordinaldf_spp_mar <- ordinaldf_spp4 %>%
   select(Date:Month, Julian3, Ordinal3) %>%
   unique()
-View(ordinaldf_spp_mar)
+#View(ordinaldf_spp_mar)
 dim(ordinaldf_spp_mar)
 
 mar_yr1 <- tibble(Julian=seq(from=66, to=365, by=1), Year=1) 
@@ -348,7 +368,7 @@ ordinaldf_spp_mar2 <- bind_cols(ordinaldf_spp_mar, mar_years) %>%
 ordinaldf_spp_apr <- ordinaldf_spp4 %>%
   select(Date:Month, Julian4, Ordinal4) %>%
   unique()
-View(ordinaldf_spp_apr)
+#View(ordinaldf_spp_apr)
 dim(ordinaldf_spp_apr)
 
 apr_yr1 <- tibble(Julian=seq(from=36, to=365, by=1), Year=1) 
@@ -398,7 +418,7 @@ ordinaldf_spp_apr2 <- bind_cols(ordinaldf_spp_apr, apr_years) %>%
 ordinaldf_spp_may <- ordinaldf_spp4 %>%
   select(Date:Month, Julian5, Ordinal5) %>%
   unique()
-View(ordinaldf_spp_may)
+#View(ordinaldf_spp_may)
 dim(ordinaldf_spp_may)
 
 may_yr1 <- tibble(Julian=seq(from=16, to=365, by=1), Year=1) 
@@ -448,7 +468,7 @@ ordinaldf_spp_may2 <- bind_cols(ordinaldf_spp_may, may_years) %>%
 ordinaldf_spp_june <- ordinaldf_spp4 %>%
   select(Date:Month, Julian6, Ordinal6) %>%
   unique()
-View(ordinaldf_spp_june)
+#View(ordinaldf_spp_june)
 dim(ordinaldf_spp_june)
 
 june_yr1 <- tibble(Julian=seq(from=351, to=365, by=1), Year=1) 
@@ -499,7 +519,7 @@ ordinaldf_spp_july <- ordinaldf_spp4 %>%
   select(Date:Month, Julian7, Ordinal7) %>%
   unique()
 dim(ordinaldf_spp_july)
-View(ordinaldf_spp_july)
+#View(ordinaldf_spp_july)
 
 july_yr1 <- tibble(Julian=seq(from=321, to=365, by=1), Year=1)
 july_yr2 <- tibble(Julian=seq(from=1, to=366, by=1), Year=2)
@@ -548,7 +568,7 @@ ordinaldf_spp_july2 <- bind_cols(ordinaldf_spp_july, july_years) %>%
 ordinaldf_spp5 <- bind_rows(ordinaldf_spp_mar2, ordinaldf_spp_apr2, ordinaldf_spp_may2, ordinaldf_spp_june2, ordinaldf_spp_july2) %>%
   full_join(meso_peaks_sppmo, by="Peak_month", multiple = "all") %>%
   rename(Julian_year2=Julian_year)
-View(ordinaldf_spp5)
+#View(ordinaldf_spp5)
 
 # then repeat for every station and loess span
 Stations <- meso_df %>% ungroup() %>% distinct(Station) # 6 stations
@@ -573,7 +593,7 @@ ordinaldf_spp6 <- ordinaldf_spp5 %>%
   left_join(Species_year, by="Species_year") %>% 
   select(Span, Station, Date, Month, Ordinal, Julian, Year, Julian_year2, Species_year2, Peak_month, Species) %>%   filter(!is.na(Span)) # remove NAs
 
-View(ordinaldf_spp6)
+#View(ordinaldf_spp6)
 dim(ordinaldf_spp6) # 887580 rows
 
 summary(ordinaldf_spp6)
@@ -617,19 +637,22 @@ Meso_loess_pred <- dat.pred2 %>%
   mutate(CPUE_pred= exp(CPUE_pred)) %>% 
   mutate(CPUE_pred= CPUE_pred - 1) %>%
   # if less than 0, make it 0, can't be negative
-  mutate(CPUE_pred0 = ifelse(CPUE_pred<0, 0, CPUE_pred)) %>% 
+  
+  ######THIS IS IMPORTANT TO NOTE!!! #######
+mutate(CPUE_pred0 = ifelse(CPUE_pred<0, 0, CPUE_pred)) %>% 
   # query out Inf
   filter(CPUE_pred0 != "Inf") %>% 
   # calculate total sum for cumsum/ quantiles
   group_by(Species_year2, Station, Species, Span) %>% 
-  mutate(CPUE_tot = sum(CPUE_pred0)) %>% 
+  mutate(CPUE_tot = sum(CPUE_pred0)) %>%                       #####SHOULD RENAME THIS TO CPUE_PRED_TOT
+  
+  ######## I CAN ADD SOMETHING HERE TO CALCULATE PERCENTS #######
   ungroup() %>% 
   # filter year x station combo where Meso are present
   filter(!is.na(Date))  
 summary(Meso_loess_pred) #886585 rows
-
+dim(Meso_loess_pred)
 View(Meso_loess_pred)
-summary(Meso_loess_pred)
 
 # Meso_loess_pred$Species <- as_factor(Meso_loess_pred$Species)
 # Meso_loess_pred$Station <- as_factor(Meso_loess_pred$Station)
@@ -649,6 +672,9 @@ View(Meso_pred)
 
 # Based on cumsum %total catch, break down into ~15%, 50%, 85% quantile ranges
 # and extract the dates where those %catches occurred each year
+
+
+#### WHY NOT 100% ??? ####
 Meso_pred_quantiles <- Meso_pred %>%
   mutate(Quantile= case_when(
     CPUE_predper2 >= 13 & CPUE_predper2 <= 16 ~ "Lower",
@@ -697,20 +723,21 @@ meso_spp
 
 
 ## Species pilots
+unique(Meso_loess_pred3$Species)
 # Eury example
 Meso_loess_pred_Eury <- Meso_loess_pred3 %>%
   filter(Species=="Eurytemora affinis") 
 Meso_pred_quantiles_Eury <- Meso_pred_quantiles1 %>%
     filter(Species=="Eurytemora affinis") 
 
-ggplot(Meso_loess_pred_Eury, aes(Date, CPUE_pred0))+
+loess_pred_eury <- ggplot(Meso_loess_pred_Eury, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=1)+
   geom_point(data=Meso_pred_quantiles_Eury, aes(Date, CPUE_pred0, col=Quantile))+
   scale_x_date(breaks="1 year")+
   theme_classic()+
   theme(axis.text.x = element_text(angle=90))+
-  facet_grid(Station~Species, scales="free_y")+
+  facet_grid(~Station * Species, scales="free_y")+
   labs(y="CPUE", title="Eurytemora affinis", subtitle="Loess, span=0.025, degree=2")
 
 
@@ -724,7 +751,7 @@ Meso_pred_quantiles_Pseudo <- Meso_pred_quantiles1 %>%
 
 meso_spp
 
-ggplot(Meso_loess_pred_Pseudo, aes(Date, CPUE_pred0))+
+loess_pred_pseudo <- ggplot(Meso_loess_pred_Pseudo, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=1)+
   geom_point(data=Meso_pred_quantiles_Pseudo, aes(Date, CPUE_pred0, col=Quantile))+
@@ -745,7 +772,7 @@ Meso_pred_quantiles_Limno <- Meso_pred_quantiles1 %>%
 
 meso_spp
 
-ggplot(Meso_loess_pred_Limno, aes(Date, CPUE_pred0))+
+loess_pred_Limno <- ggplot(Meso_loess_pred_Limno, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=1)+
   geom_point(data=Meso_pred_quantiles_Limno, aes(Date, CPUE_pred0, col=Quantile))+
@@ -766,7 +793,8 @@ Meso_pred_quantiles_Sino <- Meso_pred_quantiles1 %>%
 
 meso_spp
 
-ggplot(Meso_loess_pred_Sino, aes(Date, CPUE_pred0))+
+
+loess_pred_Sino <- ggplot(Meso_loess_pred_Sino, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=1)+
   geom_point(data=Meso_pred_quantiles_Sino, aes(Date, CPUE_pred0, col=Quantile))+
@@ -787,7 +815,7 @@ Meso_pred_quantiles_Bos <- Meso_pred_quantiles1 %>%
 
 meso_spp
 
-ggplot(Meso_loess_pred_Bos, aes(Date, CPUE_pred0))+
+loess_pred_Bos <- ggplot(Meso_loess_pred_Bos, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=1)+
   geom_point(data=Meso_pred_quantiles_Bos, aes(Date, CPUE_pred0, col=Quantile))+
@@ -810,6 +838,7 @@ Meso_loess25_quantiles <- Meso_pred_quantiles1 %>%
   select(Species, Year, Species_year2, Station, Date, Julian_year2, CPUE_pred0, Quantile)
 View(Meso_loess25_quantiles)
 
+#### SEEMS TO BE AN ERROR IN THE SCALE OF DIAPTOMOS ####
 ggplot(Meso_loess_pred3, aes(Date, CPUE_pred0))+
   geom_vline(aes(xintercept=Species_year3), color="gray50")+
   geom_line(col="black", linewidth=0.75)+
@@ -879,5 +908,259 @@ library(patchwork)
 plot1 + plot2 + plot3 + plot4 + plot_layout(nrow=4)
 ```
 
+```{r - TYLER TRIES TO PLOT}
+
+patchwork_side <-c()
+for (species in unique(Meso_pred_quantiles$Species)) {
+  for (station in unique(Meso_pred_quantiles$Station)) {
+    plot_df <- Meso_pred_quantiles %>% filter(Species == species, Station == station)
+    hist_plot_side <- plot_df %>% ggplot(aes(Julian_year2, fill = Quantile)) + 
+    geom_histogram(position = "dodge", binwidth=1)+
+    labs(subtitle = paste0(species, " at Station: ",station, " predicted Julian date per quantile"))
+    patchwork_side[[paste0(species, station)]] <- hist_plot_side 
+  }
+  
+}
+patchwork_side <- wrap_plots(patchwork_side, ncol = 2)
+
+patchwork_stacked <-c()
+for (species in unique(Meso_pred_quantiles$Species)) {
+  plot_df <- Meso_pred_quantiles %>% filter(Species == species)
+  hist_plot_stacked <- plot_df %>% ggplot(aes(Julian_year2, fill = Quantile)) + 
+  geom_histogram(position = "stack", binwidth=2) +
+  labs(title = species)
+  patchwork_stacked[[species]] <- hist_plot_stacked
+  
+}
+patchwork_stacked <- wrap_plots(patchwork_stacked, ncol = 2)
+
+###DOT PLOT< BUT PROBLEM IS ALL THE STATIONS
+patchwork_dot <-c()
+for (species in unique(Meso_pred_quantiles$Species)) {
+  plot_df <- Meso_pred_quantiles %>% filter(Species == species)
+  dot_plot <- plot_df %>% ggplot(aes(x=Species_year2 , y=Julian_year2))+
+        geom_point(aes(color=Quantile, shape = Station), size=.5)
+  patchwork_dot[[species]] <- dot_plot
+}
+patchwork_dot <- wrap_plots(patchwork_dot, ncol = 2)
+
+
+### MAKE A scatterplot With Year and Julian Date
+
+install.packages("scatterplot3d") # Install
+library("scatterplot3d") # load
+
+###For 3d scatterplot purposes. Change station numbers to be 1,2,3,4,5,6
+print(unique(Meso_pred_quantiles$Station))
+Station_east_west <- c("NZ028" = 5, "NZ048" = 4, "NZ054" = 3, "NZ060"= 2, "NZ064" = 1, "NZD41" = 6)
+Tyler_Meso_pred <- Meso_pred_quantiles
+Tyler_Meso_pred$Stations_num <- Station_east_west[Meso_pred_quantiles$Station]
+length(Tyler_Meso_pred$Julian_year2)
+patchwork_3dot <- c()
+stations <- MyZoopsMap %>% ggplot(aes(Longitude, Latitude)) + geom_point(aes(color = Station))
+
+colors <- c('Lower' = "#999999", 'Median' = "#E69F00", 'Upper' = "#56B4E9")
+shapes = c("NZ028" = 15, "NZ048" = 16, "NZ054" = 17, "NZ060" = 18, "NZ064" = 19, "NZD41" = 20)
+unique(Tyler_Meso_pred$Station)
+length(is.na(Tyler_Meso_pred$Quantile))
+
+
+plot_df <- Tyler_Meso_pred %>% filter(Species == "Limnoithona tetraspina")
+patchwork_dot_l <- c()
+for (station in unique(plot_df$Station)) {
+  plot_df <- plot_df %>% filter(Station == station)
+  dot_plot_l <- plot_df %>% ggplot(aes(x=Species_year2 , y=Julian_year2))+
+        geom_point(aes(color=Quantile), size=.5)
+  patchwork_dot_l[[species]] <- dot_plot_l
+}
+patchwork_dot_l <- wrap_plots(patchwork_dot_l, ncol = 3)
+
+
+print(species)
+patchwork_3dot <- wrap_plots(patchwork_3dot, ncol = 2)
+
+
+
+
+Tyler_meso_df <- meso_df
+unique(Tyler_meso_df$Species)
+
+view(Tyler_meso_df)
+
+### PLOT OvER TRUTH Limnoithona tetraspina ###
+Tyler_meso_df <- meso_df
+Tyler_meso_df <- Tyler_meso_df %>% filter(Species == "Limnoithona tetraspina")
+og_limno <- ggplot(Tyler_meso_df, aes(Date, CPUE))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  # geom_point(data=Meso_pred_quantiles_Limno, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Limnoithona tetraspina", subtitle="Original Data(Monthly)")
+
+patchwork_Limno <- wrap_plots(og_limno, loess_pred_Limno, nrow = 2)
+
+### PLOT OVER TRUTH Bosmina longirostris###
+Tyler_meso_df <- meso_df
+Tyler_meso_df <- Tyler_meso_df %>% filter(Species == "Bosmina longirostris")
+og_Bos <- ggplot(Tyler_meso_df, aes(Date, CPUE))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  #geom_point(data=Meso_pred_quantiles_Bos, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Bosmina longirostris", subtitle="Original Data(Monthly)")
+
+patchwork_Bos <- wrap_plots(og_Bos, loess_pred_Bos, nrow = 2)
+
+
+### PLOT OVER TRUTH Pseudodiaptomus forbesi###
+Tyler_meso_df <- meso_df
+Tyler_meso_df <- Tyler_meso_df %>% filter(Species == "Pseudodiaptomus forbesi")
+og_pseudo <- ggplot(Tyler_meso_df, aes(Date, CPUE))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Pseudo, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Pseudodiaptomus forbesi", subtitle="Original Data(Monthly)")
+
+patchwork_pseudo <- wrap_plots(og_pseudo, loess_pred_pseudo, nrow = 2)
+
+
+### PLOT OVER TRUTH Sinocalanus doerrii###
+Tyler_meso_df <- meso_df
+Tyler_meso_df <- Tyler_meso_df %>% filter(Species == "Sinocalanus doerrii")
+og_sino <- ggplot(Tyler_meso_df, aes(Date, CPUE))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(data=Meso_pred_quantiles_Sino, aes(Date, CPUE_pred0, col=Quantile))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Sinocalanus doerrii", subtitle="Original Data(Monthly)")
+
+patchwork_Sino <- wrap_plots(og_sino, loess_pred_Sino, nrow = 2)
+
+
+
+patchwork_temp_sal2 <- c()
+Tyler_meso_df <- meso_df
+plot_df <- Tyler_meso_df %>% filter(Species == "Sinocalanus doerrii")
+
+Temp_plot <- ggplot(plot_df, aes(Date, Temperature))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="Temperature", title="Temperature TimeSeries", subtitle="Original Data(Monthly)")
+
+patchwork_temp_sal2[["Temperature"]] <- Temp_plot
+
+
+salinity_bot_plot <- ggplot(plot_df, aes(Date, SalBott))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="Salinity Bottom", title="Salinity Bottom TimeSeries", subtitle="Original Data(Monthly)")
+
+patchwork_temp_sal2[["Salinity Bottom"]] <- salinity_bot_plot
+
+salinity_surf_plot <- ggplot(plot_df, aes(Date, SalSurf))+
+  geom_vline(aes(xintercept=Year), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="Salinity Bottom", title="Salinity Surf TimeSeries", subtitle="Original Data(Monthly)")
+
+patchwork_temp_sal2[["Salinity Surf"]] <- salinity_surf_plot
+
+patchwork_temp_sal2 <- wrap_plots(patchwork_temp_sal2)
+
+
+
+#### TYLER TO RECREATE HER LOESS EXAMPLES WHILE OVERLAYING THE ACTUAL COLLECTION CPUE
+
+Tylers_Meso_loess_pred3 <- Meso_loess_pred3
+Tyler_meso_df_to_join <- Tyler_meso_df %>% select("Station", "Date", "Species", "CPUE", "Taxname", "SalSurf", "SalBott", "Secchi", "Temperature")
+Tylers_Meso_loess_pred3 <- Tylers_Meso_loess_pred3 %>% left_join(Tyler_meso_df_to_join, by=c("Station", "Date", "Species"))
+view(Tylers_Meso_loess_pred3)
+view(Tyler_meso_df_to_join)
+
+
+
+# Sino example
+Tylers_Meso_loess_pred3_sino <- Tylers_Meso_loess_pred3 %>%
+  filter(Species=="Sinocalanus doerrii") #%>% 
+  #filter(Station != "NZD41")
+view(Tylers_Meso_loess_pred3_sino)
+Meso_pred_quantiles_Sino <- Meso_pred_quantiles1 %>%
+    filter(Species=="Sinocalanus doerrii")  #%>% 
+  #filter(Station != "NZD41")
+
+meso_spp
+
+
+loess_pred_Sino <- ggplot(Tylers_Meso_loess_pred3_sino, aes(Date, CPUE_pred0))+
+  geom_vline(aes(xintercept=Species_year3), color="gray50")+
+  geom_line(col="black", linewidth=1)+
+  geom_point(aes(Date, CPUE))+
+  scale_x_date(breaks="1 year")+
+  theme_classic()+
+  theme(axis.text.x = element_text(angle=90))+
+  facet_grid(Station~Species, scales="free_y")+
+  labs(y="CPUE", title="Sinocalanus doerrii", subtitle="Loess, span=0.025, degree=2")
+
+```
+
+
+``` {r Tyler Mapping}
+# Create base map with tiles
+Tyler_Mapping_df <- MyZoopsMap
+Tyler_Mapping_df$Region <- c('Confluence', 'Delta', 'Suisun Bay', 'Suisun Bay', 'Confluence', 'San Pablo Bay')
+center_lat <- sum(Tyler_Mapping_df$Latitude)/6
+center_long <- sum(Tyler_Mapping_df$Longitude)/6
+map <- leaflet::leaflet() %>%
+  addProviderTiles("Esri.WorldStreetMap") %>%
+  setView(lng = center_long, lat = center_lat, zoom = 8)
+
+# Check if data is not empty
+
+
+map <- map %>%
+  addCircleMarkers(data = Tyler_Mapping_df,
+    lng = ~Longitude,
+    lat = ~Latitude,
+    label = ~paste0(" Station: ", Station, " || Region: ", Region), labelOptions = labelOptions(textsize = "18px"),
+    # color = Station,
+    radius = 7,
+    fillOpacity = 1,
+    stroke = FALSE
+ )
+
+#%>%
+  # addLegend(
+  #   position = "bottomright", 
+  #   colors = c("black", "maroon"), 
+  #   labels = c("Fish Stations", "Zooplankton Stations"), 
+  #   opacity = 1 
+  # )
+
+
+```
 
 
